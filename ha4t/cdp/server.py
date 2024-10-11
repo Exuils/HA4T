@@ -9,10 +9,28 @@
 import os
 import socket
 import subprocess
+import sys
 import time
 import adbutils
 import requests
-from ..utils.log_utils import log_out
+from ha4t.utils.log_utils import log_out
+import importlib.resources
+
+
+def get_adapter_path():
+    """
+    获取适配器路径
+    :return:
+    """
+    if sys.version_info < (3, 9):
+        context = importlib.resources.path("ha4t.binaries", "__init__.py")
+    else:
+        ref = importlib.resources.files("ha4t.binaries") / "__init__.py"
+        context = importlib.resources.as_file(ref)
+    with context as path:
+        pass
+    # Return the dir. We assume that the data files are on a normal dir on the fs.
+    return str(path.parent)
 
 
 class Server:
@@ -54,6 +72,20 @@ class Server:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('localhost', port)) == 0
 
+    @classmethod
+    def wait_connect(cls, port, timeout=10):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                status_code = requests.get(f"http://localhost:{port}/json").status_code
+                if status_code == 200:
+                    break
+            except:
+                pass
+            if time.time() - start_time > timeout:
+                raise TimeoutError("连接超时")
+            time.sleep(0.1)
+
 
 class CdpServer(Server):
     def __init__(self, ignore_exist_port=True):
@@ -63,6 +95,7 @@ class CdpServer(Server):
         """
         self.ws_endpoint = None
         self.ignore_exist_port = ignore_exist_port
+        self.adapter_pid = None
 
     @staticmethod
     def check_port_connection(port, timeout=10):
@@ -98,7 +131,7 @@ class CdpServer(Server):
             end = rs.split("@")[-1]
             log_out(f"app webview 进程 {end} 已存在，尝试端口转发")
             server = adb.forward(local=f"tcp:{port}", remote=f"localabstract:{end}")
-            requests.get(f"http://localhost:{port}/json", timeout=timeout)
+            self.wait_connect(port, timeout)
             self.ws_endpoint = f"http://localhost:{port}"
             log_out(f"CDP端口转发成功，端口：{port}")
             return server
@@ -112,12 +145,15 @@ class CdpServer(Server):
         :param timeout: 超时时间
         """
         can_start = self.can_start_server(port)
+        adapptools_path = os.path.join(get_adapter_path(), "remotedebug_ios_webkit_adapter")
+
         if can_start:
-            server = subprocess.Popen(["remotedebug_ios_webkit_adapter", f"--port={str(port)}"],
+            server = subprocess.Popen([adapptools_path, f"--port={str(port)}"],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,shell=True)
-            requests.get(f"http://localhost:{port}/json", timeout=timeout)
+            self.wait_connect(port, timeout)
             self.ws_endpoint = f"http://localhost:{port}"
             log_out(f"CDP端口转发成功，端口：{port}")
+            self.adapter_pid = server.pid
             return server
         self.ws_endpoint = f"http://localhost:{port}"
         return None
@@ -170,3 +206,13 @@ class CdpServer(Server):
         :return:
         """
         pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.adapter_pid:
+            subprocess.Popen(f"kill -9 {self.adapter_pid}", shell=True)
+
+
+
+if __name__ == '__main__':
+    server = CdpServer()
+    server.start_server_for_ios_app(port=9222, timeout=10)

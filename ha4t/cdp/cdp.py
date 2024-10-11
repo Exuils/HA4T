@@ -18,9 +18,9 @@ import PIL.Image
 import requests
 import websockets
 from typing import Union
-from .jsCode import Jscript
-from ..config import Config as CF
-from ..utils.log_utils import log_out,cost_time
+from ha4t.cdp.jsCode import Jscript
+from ha4t.config import Config as CF
+from ha4t.utils.log_utils import log_out,cost_time
 
 # js 获取及拼接工具类
 JS = Jscript()
