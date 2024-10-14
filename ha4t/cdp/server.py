@@ -6,15 +6,17 @@
 """
 用于启动 app ，并开启cdp服务，支持pc，android，ios
 """
+import importlib.resources
 import os
 import socket
 import subprocess
 import sys
 import time
+
 import adbutils
 import requests
+
 from ha4t.utils.log_utils import log_out
-import importlib.resources
 
 
 def get_adapter_path():

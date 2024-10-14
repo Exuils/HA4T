@@ -1,8 +1,9 @@
 import os
+import re
 import sys
+
 import setuptools
 from setuptools import find_packages
-import re
 
 with open("./ha4t/__init__.py", 'r') as f:
     content = f.read()

@@ -4,18 +4,26 @@
 # @文件名      : cv.py
 # @项目名      : cv
 # @Software   : PyCharm
+import os.path
+import sys
 import time
 import types
 from copy import deepcopy
-from ha4t.config import Config as CF
+
+import cv2
+import cv2 as cv
+import numpy as np
+from six import PY3
+from uiautomator2 import Device
+
+from ha4t.aircv.aircv import get_resolution, crop_image
 from ha4t.aircv.keypoint_matching import KAZEMatching, BRISKMatching, AKAZEMatching, ORBMatching
 from ha4t.aircv.keypoint_matching_contrib import SIFTMatching, SURFMatching, BRIEFMatching
 from ha4t.aircv.multiscale_template_matching import MultiScaleTemplateMatchingPre, MultiScaleTemplateMatching
+from ha4t.aircv.settings import Settings as ST
 from ha4t.aircv.template_matching import TemplateMatching
 from ha4t.aircv.transform import TargetPos
-from ha4t.aircv.settings import Settings as ST
-import cv2 as cv
-from uiautomator2 import Device
+from ha4t.config import Config as CF
 
 MATCHING_METHODS = {
     "tpl": TemplateMatching,
@@ -45,7 +53,7 @@ class Template(object):
 
     def __init__(self, filename, threshold=None, target_pos=TargetPos.MID, record_pos=None, resolution=(), rgb=False,
                  scale_max=800, scale_step=0.005):
-        self.filename = filename
+        self.filename = os.path.join(CF.CURRENT_PATH, filename)
         self._filepath = None
         self.threshold = threshold or ST.THRESHOLD
         self.target_pos = target_pos
@@ -219,7 +227,7 @@ class Predictor(object):
         return area
 
 
-def match_loop(screenshot_func: Device.screenshot, template, timeout=10, threshold=None, rgb=False):
+def match_loop(screenshot_func: Device.screenshot, template, timeout=10, threshold=None, rgb=False,*args, **kwargs):
     """
     模板匹配循环，直到匹配到一个或多个模板为止.
     :param screenshot_func: 截图函数，返回截图图片.
@@ -235,7 +243,7 @@ def match_loop(screenshot_func: Device.screenshot, template, timeout=10, thresho
         source_image =screenshot_func()
         # set * h w scale
         source_image = np.array(source_image.resize((CF.SCREEN_WIDTH, CF.SCREEN_HEIGHT)))
-        pos = Template(template, rgb=rgb, threshold=threshold).match_in(source_image)
+        pos = Template(template, rgb=rgb, threshold=threshold, *args, **kwargs).match_in(source_image)
         if pos:
             return pos
         if time.time() - start_time > timeout:

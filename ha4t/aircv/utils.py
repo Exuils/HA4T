@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import cv2
 import time
+
+import cv2
 import numpy as np
 from PIL import Image
 
 from ha4t.aircv.error import TemplateInputError
-
 
 
 def print_run_time(func):

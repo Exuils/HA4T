@@ -6,10 +6,12 @@
 # @Software   : PyCharm
 """orc识别文字 获取文字位置 """
 import time
-from ha4t.config import Config as CF
+
 import PIL.Image
 import numpy as np
 from paddleocr import PaddleOCR
+
+from ha4t.config import Config as CF
 from ha4t.utils.log_utils import log_out
 
 

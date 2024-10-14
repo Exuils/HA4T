@@ -2,7 +2,6 @@
 # @时间       : 2024/8/5 17:56
 # @作者       : caishilong
 # @文件名      : decorator_utils.py
-# @项目名      : pc-test
 # @Software   : PyCharm
 import threading
 import time

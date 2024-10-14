@@ -12,14 +12,14 @@
 from __future__ import division
 from __future__ import print_function
 
-import cv2
 import time
 
+import cv2
+
 from ha4t.aircv.aircv import crop_image
+from ha4t.aircv.cal_confidence import cal_rgb_confidence, cal_ccoeff_confidence
 from ha4t.aircv.error import TemplateInputError
 from ha4t.aircv.utils import generate_result, check_source_larger_than_search, img_mat_rgb_2_gray, print_run_time
-from ha4t.aircv.cal_confidence import cal_rgb_confidence, cal_ccoeff_confidence
-
 
 
 class MultiScaleTemplateMatching(object):

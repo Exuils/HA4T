@@ -4,9 +4,9 @@
 import cv2
 import numpy as np
 
+from .cal_confidence import cal_ccoeff_confidence, cal_rgb_confidence
 from .error import *  # noqa
 from .utils import generate_result, check_image_valid
-from .cal_confidence import cal_ccoeff_confidence, cal_rgb_confidence
 
 # SIFT识别特征点匹配，参数设置:
 FLANN_INDEX_KDTREE = 0

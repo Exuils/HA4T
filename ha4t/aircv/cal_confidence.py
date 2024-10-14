@@ -6,6 +6,7 @@
 
 import cv2
 import numpy as np
+
 from ha4t.aircv.utils import img_mat_rgb_2_gray
 
 

@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import os
-import cv2
 from distutils.version import LooseVersion
+
+import cv2
+
 from ha4t.aircv.resolution import cocos_min_strategy
 
 

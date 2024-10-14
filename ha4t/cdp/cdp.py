@@ -2,7 +2,6 @@
 # @时间       : 2024/8/21 10:02
 # @作者       : caishilong
 # @文件名      : cdp.py
-# @项目名      : xcs-mobile-ui-testing
 # @Software   : PyCharm
 """
 CDPClient 类用于与 Chrome DevTools Protocol (CDP) 进行通信。它通过 WebSocket 连接到浏览器的调试端口，并发送 CDP 命令以控制浏览器。
@@ -14,19 +13,21 @@ import json
 import queue
 import threading
 import time
+from typing import Union
+
 import PIL.Image
 import requests
 import websockets
-from typing import Union
+
 from ha4t.cdp.jsCode import Jscript
 from ha4t.config import Config as CF
-from ha4t.utils.log_utils import log_out,cost_time
+from ha4t.utils.log_utils import log_out, cost_time
 
 # js 获取及拼接工具类
 JS = Jscript()
 
 
-class CDPClient:
+class WS_CDP:
     def __init__(self, url):
         self.ws_endpoint = url
         self.ws = None
@@ -57,15 +58,20 @@ class CDPClient:
         await self.ws.send(json.dumps(command))
         return await self._wait_for_response(command_id)
 
-    async def _wait_for_response(self, command_id):
+    async def _wait_for_response(self, command_id,timeout=5):
         """
         等待具有指定 ID 的响应。
         """
+        t1 = time.time()
         while True:
             response = await self.ws.recv()
             response = json.loads(response)
             if response.get("id") == command_id:
                 return response
+            if time.time() - t1 > timeout:
+                raise ValueError(f"Command {command_id} timed out.")
+
+
 
     @staticmethod
     def _next_command_id():
@@ -85,8 +91,7 @@ class CDPClient:
 
 def worker(url, task_queue, result_queue, timeout=10):
     async def main():
-
-        client = CDPClient(url)
+        client = WS_CDP(url)
         try:
             await client.connect()
         except Exception as e:
@@ -103,7 +108,6 @@ def worker(url, task_queue, result_queue, timeout=10):
                 result_queue.put(e)
                 break
         await client.close()
-
     asyncio.run(main())
 
 
@@ -124,8 +128,9 @@ class Page:
         self.close()
         self.__init__(self.ws)
 
-    def send(self, method, params=None):
+    def send(self, method, params=None,timeout=10):
         self.task_queue.put(self.command(method, params))
+        t1 = time.time()
         while True:
             try:
                 result = self.result_queue.get(block=True, timeout=1)
@@ -133,6 +138,8 @@ class Page:
                     raise result
                 return result
             except queue.Empty:
+                if time.time() - t1 > timeout:
+                    raise ValueError(f"Command {method} timed out.")
                 pass
 
     def execute_script(self, script) -> Union[str, dict, int]:
@@ -162,17 +169,17 @@ class Page:
     def get_title(self):
         return self.execute_script("document.title")
 
-    def element_exist(self, locator: tuple):
+    def exist(self, locator: tuple):
         """ 判断元素是否存在 """
         script = JS.element_exists(locator=locator)
         return self.execute_script(script)
 
-    def wait_element(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
+    def wait(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
         """ 等待元素出现 """
         t1 = time.time()
         while True:
             try:
-                if self.element_exist(locator):
+                if self.exist(locator):
                     break
                 if time.time() - t1 > timeout:
                     raise ValueError(f"元素定位超时：{locator}")
@@ -195,7 +202,7 @@ class Page:
     @cost_time
     def click(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
         """ 点击元素 """
-        self.wait_element(locator, timeout)
+        self.wait(locator, timeout)
         script = JS.add_click(element_var_name=JS.TEMP_VAR_NAME)
         self.execute_script(script)
 
@@ -270,6 +277,16 @@ class Element:
 
     def is_enabled(self):
         return self.cdp.execute_script(f"{self.id}.disabled == false")
+
+    def wait_util_enabled(self, timeout=10):
+        t1 = time.time()
+        while True:
+            if self.is_enabled():
+                break
+            if time.time() - t1 > timeout:
+                raise ValueError(f"元素未启用：{self.id}")
+            time.sleep(0.1)
+
 
     def is_selected(self):
         return self.cdp.execute_script(f"{self.id}.selected == true")

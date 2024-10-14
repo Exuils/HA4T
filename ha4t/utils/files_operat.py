@@ -2,7 +2,6 @@
 # @时间       : 2024/8/22 16:24
 # @作者       : caishilong
 # @文件名      : files_operat.py
-# @项目名      : xcs-mobile-ui-testing
 # @Software   : PyCharm
 import os
 from typing import Union

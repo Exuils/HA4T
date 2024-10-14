@@ -8,7 +8,9 @@ import functools
 import logging
 import os
 import time
+
 import colorlog
+
 from ha4t.config import Config as CF
 
 if CF.SAVE_LOG:
@@ -109,11 +111,11 @@ def cost_time(func):
         start_time = time.time()  # 记录开始时间
         try:
             result = func(*args, **kwargs)  # 调用原始函数
-            log_out(f"动作：{func.__name__}-执行成功，参数：{args, *kwargs}，耗时：{round(time.time() - start_time, 3)}秒")
+            log_out(f"动作：{func.__name__}-执行成功，参数：{args, *kwargs.values()}，耗时：{round(time.time() - start_time, 3)}秒")
             return result
         except Exception as e:
             log_out(
-                f"动作：{func.__name__}-执行失败，参数：{args, *kwargs},耗时：{round(time.time() - start_time, 3)}秒 失败原因：{e}",
+                f"动作：{func.__name__}-执行失败，参数：{args, *kwargs.values()},耗时：{round(time.time() - start_time, 3)}秒 失败原因：{e}",
                 level=2)
             raise e
 

@@ -6,11 +6,12 @@
 import cv2
 import numpy as np
 
-# from airtest.utils.logger import get_logger
-
+from .cal_confidence import cal_ccoeff_confidence, cal_rgb_confidence
 from .error import *  # noqa
 from .utils import generate_result, check_image_valid, print_run_time
-from .cal_confidence import cal_ccoeff_confidence, cal_rgb_confidence
+
+
+# from airtest.utils.logger import get_logger
 
 # LOGGING = get_logger(__name__)
 

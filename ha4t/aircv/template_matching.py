@@ -8,8 +8,9 @@
     2. rgb: 彩色三通道,进行彩色权识别.
 """
 import cv2
-from .utils import generate_result, check_source_larger_than_search, img_mat_rgb_2_gray, print_run_time
+
 from .cal_confidence import cal_rgb_confidence
+from .utils import generate_result, check_source_larger_than_search, img_mat_rgb_2_gray, print_run_time
 
 
 class TemplateMatching(object):

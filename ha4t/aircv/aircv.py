@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+
 import cv2
 import numpy as np
-from ha4t.aircv.error import FileNotExistError
 from six import PY2, PY3
+
+from ha4t.aircv.error import FileNotExistError
 from ha4t.aircv.utils import cv2_2_pil, compress_image
 
 
