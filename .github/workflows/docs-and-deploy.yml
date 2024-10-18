@@ -37,7 +37,7 @@ jobs:
       - name: 构建文档
         run: |
           cd docs
-          sphinx-apidoc -o docs/source/modules ../ha4t/ --extensions EXTENSIONS -e
+          sphinx-apidoc -o ./modules/ ../ha4t/ --extensions EXTENSIONS -e
           make html
 
       - name: Setup Pages

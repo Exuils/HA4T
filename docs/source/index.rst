@@ -32,6 +32,7 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
    :caption: 快速开始
 
    README_MORE.rst
+
 ================================
 
 .. toctree::
@@ -47,7 +48,6 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
    :caption: 原生元素操作
 
    modules/ha4t.api
-
 
 ================================
 
@@ -73,6 +73,7 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
    :caption: 所有模块
 
    modules/modules
+
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`

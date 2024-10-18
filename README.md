@@ -1,7 +1,7 @@
 # HA4T 🐍
 
 [![PyPI version](https://badge.fury.io/py/ha4t.svg)](https://badge.fury.io/py/ha4t)
-[![Documentation Status](https://readthedocs.org/projects/ha4t/badge/?version=latest)](https://ha4t.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://1103837067.github.io/HA4T/)
 
 HA4T (Hybrid App Automation Testing Tool)
 是一个跨平台的UI自动化框架，适用于混合型app、游戏、web和原生app等。该框架基于aircv、OCR、CDP、uiautomator2和facebook_wda进行开发。
@@ -32,15 +32,12 @@ pip install ha4t
 
 ## 详细文档
 
-查看我们的[详细文档](https://ha4t.readthedocs.io/)以获取更多信息，包括：
+查看我们的[详细文档](https://1103837067.github.io/HA4T/)以获取更多信息，包括：
 
 - 完整的API参考
 - 高级用法指南
 - 最佳实践和技巧
 
-## 贡献
-
-我们欢迎并感谢任何形式的贡献！如果您想为HA4T做出贡献，请查看我们的[贡献指南](CONTRIBUTING.md)。
 
 ## 问题和支持
 
@@ -54,7 +51,7 @@ pip install ha4t
 
 HA4T 的开发得益于以下开源项目：
 
-- [aircv](https://github.com/NetEase/aircv)
+- [airtest](https://github.com/NetEase/airtest)
 - [uiautomator2](https://github.com/openatx/uiautomator2)
 - [facebook-wda](https://github.com/openatx/facebook-wda)
 
