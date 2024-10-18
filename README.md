@@ -1,15 +1,15 @@
 # HA4T 🐍
 
 [![PyPI version](https://badge.fury.io/py/ha4t.svg)](https://badge.fury.io/py/ha4t)
-[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen)](https://1103837067.github.io/HA4T/)
+[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen)](exuils.github.io/HA4T/)
 
-HA4T (Hybrid App Automation Testing Tool)
-是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于aircv、飞浆OCR、CDP、uiautomator2和facebook_wda进行开发。
+HA4T (Hybrid App For Testing Tool)
+是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于airtest、飞浆OCR、WS、uiautomator2和facebook_wda进行开发。
 
 ## 特性
 
 - 跨平台支持：适用于iOS、Android和Web应用
-- 多种定位方式：支持图像识别、OCR文字识别、原生控件定位等
+- 多种定位方式：支持图像识别、OCR文字识别、webview定位、原生控件定位等
 - 灵活的操作API：提供点击、滑动、输入等常用操作
 
 ## 安装
@@ -31,7 +31,7 @@ from ha4t import connect
 
 ## 详细文档(未完善)
 
-查看我们的[详细文档](https://1103837067.github.io/HA4T/)以获取更多信息，包括：
+查看我们的[详细文档](exuils.github.io/HA4T/)以获取更多信息，包括：
 
 - 完整的API参考
 - 高级用法指南
@@ -40,7 +40,7 @@ from ha4t import connect
 
 ## 问题和支持
 
-如果您遇到任何问题或需要支持，请[提交一个issue](https://github.com/1103837067/ha4t/issues)。
+如果您遇到任何问题或需要支持，请[提交一个issue](https://github.com/Exuils/HA4T/issues)。
 
 ## 许可证
 
@@ -53,6 +53,8 @@ HA4T 的开发得益于以下开源项目：
 - [airtest](https://github.com/NetEase/airtest)
 - [uiautomator2](https://github.com/openatx/uiautomator2)
 - [facebook-wda](https://github.com/openatx/facebook-wda)
+- [paddleocr](https://github.com/PaddlePaddle/PaddleOCR)
+- [ios-webkit-debug-proxy](https://github.com/google/ios-webkit-debug-proxy)
 
 感谢这些项目的贡献者们！
 如果您觉得HA4T对您有帮助，请考虑给我们一个星标 ⭐️
