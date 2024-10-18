@@ -20,5 +20,5 @@ deepdiff~=7.0.1
 opencv-python~=4.10.0.84
 matplotlib~=3.9.2
 pytest~=8.3.3
-psutil
-
+psutil~=6.1.0
+mock~=5.1.0

@@ -3,11 +3,10 @@
 # @作者       : caishilong
 # @文件名      : config.py
 # @项目名      : HA4T
-# @Software   : PyCharm
+# @软件       : PyCharm
 """
-配置文件,用于存放全局变量
+配置文件，用于存放全局变量
 """
-
 
 class Config:
     """全局变量"""
@@ -18,7 +17,7 @@ class Config:
     PLATFORM = 'android'
     # 指定设备序列号，默认不选，多设备时可指定
     DEVICE_SERIAL = None
-    # 缩放比例# 缩放比例# 缩放比例# 缩放比例
+    # 缩放比例
     SCREEN_WIDTH = 1
     SCREEN_HEIGHT = 1
     # Android包名
@@ -35,10 +34,10 @@ class Config:
     SAVE_LOG = False
     LOG_PATH = 'log'
 
-    """动态配置, 由代码自动生成"""
+    """动态配置，由代码自动生成"""
     # 设备名称
     DEVICE_NAME = ''
-    # 应用名(动态
+    # 应用名（动态）
     APP_NAME = ANDROID_PACKAGE_NAME if PLATFORM.lower() == 'android' else IOS_BUNDLE_ID
-    # 动态路径引用，用于图像识别切换路径(动态
+    # 动态路径引用，用于图像识别切换路径（动态）
     CURRENT_PATH = ""

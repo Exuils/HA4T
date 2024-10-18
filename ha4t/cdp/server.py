@@ -20,10 +20,13 @@ import requests
 from ha4t.utils.log_utils import log_out
 
 
-def get_adapter_path():
+def _get_adapter_path() -> str:
     """
     获取适配器路径
-    :return:
+
+    :return: 适配器路径
+    :Example:
+        >>> path = _get_adapter_path()  # 获取适配器路径
     """
     if sys.version_info < (3, 9):
         context = importlib.resources.path("ha4t.binaries", "__init__.py")
@@ -41,7 +44,15 @@ class Server:
     window系统进程管理类，主要用于管理服务进程
     """
 
-    def kill_dead_servers(self, port):
+    def kill_dead_servers(self, port: int) -> None:
+        """
+        结束死掉的服务器进程
+
+        :param port: 需要结束的进程所占用的端口
+        :Example:
+            >>> server = Server()
+            >>> server.kill_dead_servers(9222)  # 结束占用9222端口的进程
+        """
         if pid := self.get_port_exists(port):
             log_out(f"正在结束本机进程 {port}, pid {pid}")
             cmd = f"taskkill /f /pid {self.get_pid_by_port(port)}"
@@ -50,7 +61,15 @@ class Server:
                 time.sleep(0.1)
             log_out(f"进程 {port} 已结束, pid {pid}")
 
-    def kill_pid(self, pid):
+    def kill_pid(self, pid: int) -> None:
+        """
+        结束指定的进程
+
+        :param pid: 进程ID
+        :Example:
+            >>> server = Server()
+            >>> server.kill_pid(1234)  # 结束PID为1234的进程
+        """
         print(f"正在结束本机进程  pid {pid}")
         cmd = f"taskkill /f /pid {pid}"
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -59,11 +78,14 @@ class Server:
         print(f"id {pid} kill success")
 
     @classmethod
-    def find_process_by_name(cls, name):
+    def find_process_by_name(cls, name: str) -> list:
         """
         根据进程名查找进程
-        :param name:
-        :return:
+
+        :param name: 进程名
+        :return: 进程信息列表
+        :Example:
+            >>> processes = Server.find_process_by_name("chrome")  # 查找名为chrome的进程
         """
         list_process = []
         seen = {}  # 用于记录已经添加过的进程，格式为 {(pid, port): True}
@@ -90,7 +112,15 @@ class Server:
         return list_process
 
     @staticmethod
-    def get_pid_by_port(port):
+    def get_pid_by_port(port) -> str:
+        """
+        根据端口获取进程ID
+
+        :param port: 端口号
+        :return: 进程ID
+        :Example:
+            >>> pid = Server.get_pid_by_port(9222)  # 获取占用9222端口的进程ID
+        """
         cmd = f"netstat -ano | findstr :{port} | findstr LISTENING"
         lines = subprocess.check_output(cmd, shell=True).decode().strip().splitlines()
         for line in lines:
@@ -100,10 +130,26 @@ class Server:
 
     @classmethod
     def get_pid(cls, process) -> str:
+        """
+        获取进程的PID
+
+        :param process: 进程对象
+        :return: 进程ID
+        :Example:
+            >>> pid = Server.get_pid(process)  # 获取进程对象的PID
+        """
         return process.pid if process else None
 
     @staticmethod
     def pid_exists(pid) -> bool:
+        """
+        检查进程是否存在
+
+        :param pid: 进程ID
+        :return: 是否存在
+        :Example:
+            >>> exists = Server.pid_exists(1234)  # 检查PID为1234的进程是否存在
+        """
         try:
             subprocess.check_output(f"ps -p {pid}", shell=True, stderr=subprocess.DEVNULL)
             return True
@@ -112,11 +158,28 @@ class Server:
 
     @classmethod
     def get_port_exists(cls, port) -> bool:
+        """
+        检查端口是否被占用
+
+        :param port: 端口号
+        :return: 是否被占用
+        :Example:
+            >>> exists = Server.get_port_exists(9222)  # 检查9222端口是否被占用
+        """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('localhost', port)) == 0
 
     @classmethod
-    def wait_connect(cls, port, timeout=10):
+    def wait_connect(cls, port, timeout=10) -> None:
+        """
+        等待连接
+
+        :param port: 端口号
+        :param timeout: 超时时间
+        :raises TimeoutError: 如果连接超时
+        :Example:
+            >>> Server.wait_connect(9222, timeout=10)  # 等待连接9222端口，超时10秒
+        """
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
@@ -134,21 +197,41 @@ class CdpServer(Server):
     def __init__(self, ignore_exist_port=True):
         """
         开启H5应用cdp服务,支持pc，android，ios
+
         :param ignore_exist_port: 是否忽略已存在的端口，关闭后每次都会先结束已存在的端口
+        :Example:
+            >>> cdp_server = CdpServer(ignore_exist_port=False)  # 创建CdpServer实例并设置忽略已存在端口为False
         """
         self.ws_endpoint = None
         self.ignore_exist_port = ignore_exist_port
         self.adapter_pid = None
 
     @staticmethod
-    def check_port_connection(port, timeout=10):
+    def check_port_connection(port, timeout=10) -> bool:
+        """
+        检查端口连接
+
+        :param port: 端口号
+        :param timeout: 超时时间
+        :return: 连接是否成功
+        :Example:
+            >>> is_connected = CdpServer.check_port_connection(9222)  # 检查9222端口的连接
+        """
         try:
             requests.get(f"http://localhost:{port}/json", timeout=timeout)
             return True
         except requests.RequestException:
             return False
 
-    def can_start_server(self, port):
+    def can_start_server(self, port) -> bool:
+        """
+        检查是否可以启动服务器
+
+        :param port: 端口号
+        :return: 是否可以启动
+        :Example:
+            >>> can_start = cdp_server.can_start_server(9222)  # 检查是否可以启动9222端口的服务器
+        """
         if self.check_port_connection(port):
             log_out(f"端口{port}已存在")
             if self.ignore_exist_port:
@@ -161,12 +244,15 @@ class CdpServer(Server):
         log_out(f"开始{port}CDP端口转发...")
         return True
 
-    def start_server_for_android_app(self, adb: adbutils.AdbDevice, port=9222, timeout=10):
+    def start_server_for_android_app(self, adb: adbutils.AdbDevice, port=9222, timeout=10) -> None:
         """
         开启android app cdp服务
+
         :param adb: adb设备
         :param port: 端口
         :param timeout: 超时时间
+        :Example:
+            >>> cdp_server.start_server_for_android_app(adb_device, port=9222)  # 启动Android应用的CDP服务
         """
         can_start = self.can_start_server(port)
         if can_start:
@@ -181,12 +267,15 @@ class CdpServer(Server):
         self.ws_endpoint = f"http://localhost:{port}"
         return None
 
-    def start_server_for_ios_app(self, port=9222, timeout=10, use_existing_port=True):
+    def start_server_for_ios_app(self, port=9222, timeout=10, use_existing_port=True) -> None:
         """
         开启ios app cdp服务
-        :param use_existing_port:
+
         :param port: 端口
         :param timeout: 超时时间
+        :param use_existing_port: 是否使用已存在的端口
+        :Example:
+            >>> cdp_server.start_server_for_ios_app(port=9222)  # 启动iOS应用的CDP服务
         """
         # 使用已经存在的端口，不启动新的进程
         if use_existing_port:
@@ -215,7 +304,7 @@ class CdpServer(Server):
 
         # 启动服务
         server = subprocess.Popen(
-            [os.path.join(get_adapter_path(), "remotedebug_ios_webkit_adapter"), f"--port={str(port)}"],
+            [os.path.join(_get_adapter_path(), "remotedebug_ios_webkit_adapter"), f"--port={str(port)}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
         self.wait_connect(port, timeout)
         self.ws_endpoint = f"http://localhost:{port}"
@@ -223,15 +312,18 @@ class CdpServer(Server):
         self.adapter_pid = server.pid
 
     def start_server_for_windows_app(self, app_path: str, port=9222, reset=False, user_data_dir=None, timeout=10,
-                                     lang="zh-CN"):
+                                     lang="zh-CN") -> None:
         """
         开启windows app cdp服务
+
         :param app_path: 应用路径
         :param port: 端口
         :param reset: 是否重置用户数据
         :param user_data_dir: 用户数据目录
         :param timeout: 超时时间
         :param lang: 语言
+        :Example:
+            >>> cdp_server.start_server_for_windows_app("C:/path/to/app.exe", port=9222)  # 启动Windows应用的CDP服务
         """
         can_start = self.can_start_server(port=port)
         if can_start:
@@ -262,17 +354,28 @@ class CdpServer(Server):
         self.ws_endpoint = f"http://localhost:{port}"
         return None
 
-    def start_server_for_mac_app(self, file_path: str, port=9222):
+    def start_server_for_mac_app(self, file_path: str, port=9222) -> None:
         # 这里需要根据macOS的具体情况实现
         """
         TODO: 这里需要根据macOS的具体情况实现
-        :param file_path:
-        :param port:
-        :return:
+        :param file_path: 应用路径
+        :param port: 端口
+        :Example:
+            >>> cdp_server.start_server_for_mac_app("/path/to/app", port=9222)  # 启动macOS应用的CDP服务
         """
         pass
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """
+        退出时清理资源
+
+        :param exc_type: 异常类型
+        :param exc_val: 异常值
+        :param exc_tb: 异常追踪
+        :Example:
+            >>> with CdpServer() as server:  # 使用上下文管理器
+            ...     server.start_server_for_ios_app(port=9222)
+        """
         if self.adapter_pid:
             subprocess.Popen(f"kill -9 {self.adapter_pid}", shell=True)
 
