@@ -1,91 +1,62 @@
 # HA4T 🐍
-跨平台的UI自动化框架，适用于混合型app，游戏，web，原生app等，基于 aircv，orc，cdp，uiautomator2，facebook_wda 进行开发
 
-## Installation
+[![PyPI version](https://badge.fury.io/py/ha4t.svg)](https://badge.fury.io/py/ha4t)
+[![Documentation Status](https://readthedocs.org/projects/ha4t/badge/?version=latest)](https://ha4t.readthedocs.io/en/latest/?badge=latest)
 
-You can install the package using pip
+HA4T (Hybrid App Automation Testing Tool)
+是一个跨平台的UI自动化框架，适用于混合型app、游戏、web和原生app等。该框架基于aircv、OCR、CDP、uiautomator2和facebook_wda进行开发。
+
+## 特性
+
+- 跨平台支持：适用于iOS、Android和Web应用
+- 多种定位方式：支持图像识别、OCR文字识别、原生控件定位等
+- 灵活的操作API：提供点击、滑动、输入等常用操作
+- 强大的调试功能：支持实时截图、日志记录等
+- 高度可定制：可根据项目需求进行扩展
+
+## 安装
+
+使用pip安装HA4T：
 
 ```bash
 pip install ha4t
 ```
 
+## 快速开始
 
-## Structure
+以下是一个简单的示例，展示如何使用HA4T进行基本操作：
 
-The project has the following structure
-
-```
-├── .github
-│   └── workflows
-│       └── test.yml # holds our github action config 
-├── .gitignore
-├── Makefile
-├── README.md
-├── setup.py
-├── src
-│   ├── __init__.py 
-│   ├── hello.py 
-└── test 
-    └── test_hello.py
-```
-
-### Code Quality 🧹
-
-We provide two handy commands inside the `Makefile`, namely:
-
-- `make style` to format the code
-- `make check_code_quality` to check code quality (PEP8 basically)
-
-So far, **there is no types checking with mypy**. See [issue](https://github.com/roboflow-ai/template-python/issues/4). 
-
-### Tests 🧪
-
-[`pytests`](https://docs.pytest.org/en/7.1.x/) is used to run our tests.
-
-### Publish on PyPi 🚀
-
-**Important**: Before publishing, edit `__version__` in [src/__init__](/src/__init__.py) to match the wanted new version.
-
-We use [`twine`](https://twine.readthedocs.io/en/stable/) to make our life easier. You can publish by using
+```python
 
 ```
-export PYPI_USERNAME="you_username"
-export PYPI_PASSWORD="your_password"
-export PYPI_TEST_PASSWORD="your_password_for_test_pypi"
-make publish -e PYPI_USERNAME=$PYPI_USERNAME -e PYPI_PASSWORD=$PYPI_PASSWORD -e PYPI_TEST_PASSWORD=$PYPI_TEST_PASSWORD
-```
 
-You can also use token for auth, see [pypi doc](https://pypi.org/help/#apitoken). In that case,
+## 详细文档
 
-```
-export PYPI_USERNAME="__token__"
-export PYPI_PASSWORD="your_token"
-export PYPI_TEST_PASSWORD="your_token_for_test_pypi"
-make publish -e PYPI_USERNAME=$PYPI_USERNAME -e PYPI_PASSWORD=$PYPI_PASSWORD -e PYPI_TEST_PASSWORD=$PYPI_TEST_PASSWORD
-```
+查看我们的[详细文档](https://ha4t.readthedocs.io/)以获取更多信息，包括：
 
-**Note**: We will try to push to [test pypi](https://test.pypi.org/) before pushing to pypi, to assert everything will work
+- 完整的API参考
+- 高级用法指南
+- 最佳实践和技巧
 
-### CI/CD 🤖
+## 贡献
 
-We use [GitHub actions](https://github.com/features/actions) to automatically run tests and check code quality when a new PR is done on `main`.
+我们欢迎并感谢任何形式的贡献！如果您想为HA4T做出贡献，请查看我们的[贡献指南](CONTRIBUTING.md)。
 
-On any pull request, we will check the code quality and tests.
+## 问题和支持
 
-When a new release is created, we will try to push the new code to PyPi. We use [`twine`](https://twine.readthedocs.io/en/stable/) to make our life easier. 
+如果您遇到任何问题或需要支持，请[提交一个issue](https://github.com/1103837067/ha4t/issues)。
 
-The **correct steps** to create a new realease are the following:
-- edit `__version__` in [src/__init__](/src/__init__.py) to match the wanted new version.
-- create a new [`tag`](https://git-scm.com/docs/git-tag) with the release name, e.g. `git tag v0.0.1 && git push origin v0.0.1` or from the GitHub UI.
-- create a new release from GitHub UI
+## 许可证
 
-The CI will run when you create the new release.
+本项目采用MIT许可证。详情请见[LICENSE](LICENSE)文件。
 
-# Q&A
+## 致谢
 
-## Why no cookiecutter?
-This is a template repo, it's meant to be used inside GitHub upon repo creation.
+HA4T 的开发得益于以下开源项目：
 
-## Why reinvent the wheel?
+- [aircv](https://github.com/NetEase/aircv)
+- [uiautomator2](https://github.com/openatx/uiautomator2)
+- [facebook-wda](https://github.com/openatx/facebook-wda)
 
-There are several very good templates on GitHub, I prefer to use code we wrote instead of blinding taking the most starred template and having features we don't need. From experience, it's better to keep it simple and general enough for our specific use cases.
+感谢这些项目的贡献者们！
+如果您觉得HA4T对您有帮助，请考虑给我们一个星标 ⭐️
