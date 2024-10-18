@@ -9,15 +9,16 @@ with open("./ha4t/__init__.py", 'r') as f:
     content = f.read()
     # from https://www.py4u.net/discuss/139845
     version = re.search(r'__version__\s*=\s*[\'"]([^\'"]*)[\'"]', content).group(1)
-    
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
+
 
 def is_docker():
     if os.path.exists('/proc/self/cgroup'):
         with open('/proc/self/cgroup', 'rt') as ifh:
             return 'docker' in ifh.read()
     return False
+
 
 def parse_requirements(filename):
     """ load requirements from a pip requirements file. (replacing from pip.req import parse_requirements)"""
@@ -47,11 +48,14 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     license='Apache License 2.0',
     url="https://github.com/1103837067/HA4T",
-    install_requires=parse_requirements('requirements.txt'),
+    install_requires=parse_requirements(r'D:\project\nico\HA4T\requirements.txt'),
     packages=find_packages(exclude=("tests",)),
-    keywords=['automation', 'automated-test', 'game', 'android', 'ios',"hybird-app"],
+    keywords=['automation', 'automated-test', 'game', 'android', 'ios', "hybrid-app"],
     extras_require={
         "dev": ["flake8", "black==22.3.0", "isort", "twine", "pytest", "wheel"],
+    },
+    package_data={
+        'ha4t': ['binaries/*'],  # 包含 ha4t/bin 目录下的所有文件
     },
     classifiers=[
         "Programming Language :: Python :: 3",
