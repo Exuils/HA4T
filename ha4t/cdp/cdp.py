@@ -13,7 +13,7 @@ import json
 import queue
 import threading
 import time
-from typing import Union
+from typing import Any
 
 import PIL.Image
 import requests
@@ -58,7 +58,7 @@ class WS_CDP:
         await self.ws.send(json.dumps(command))
         return await self._wait_for_response(command_id)
 
-    async def _wait_for_response(self, command_id,timeout=5):
+    async def _wait_for_response(self, command_id, timeout=5):
         """
         等待具有指定 ID 的响应。
         """
@@ -70,8 +70,6 @@ class WS_CDP:
                 return response
             if time.time() - t1 > timeout:
                 raise ValueError(f"Command {command_id} timed out.")
-
-
 
     @staticmethod
     def _next_command_id():
@@ -108,6 +106,7 @@ def worker(url, task_queue, result_queue, timeout=10):
                 result_queue.put(e)
                 break
         await client.close()
+
     asyncio.run(main())
 
 
@@ -128,7 +127,7 @@ class Page:
         self.close()
         self.__init__(self.ws)
 
-    def send(self, method, params=None,timeout=10):
+    def send(self, method, params=None, timeout=10):
         self.task_queue.put(self.command(method, params))
         t1 = time.time()
         while True:
@@ -142,7 +141,7 @@ class Page:
                     raise ValueError(f"Command {method} timed out.")
                 pass
 
-    def execute_script(self, script) -> Union[str, dict, int]:
+    def execute_script(self, script) -> Any:
         rs = self.send("Runtime.evaluate", {"expression": script, "returnByValue": True})
         try:
             rs = rs["result"]["result"]["value"]
@@ -191,13 +190,12 @@ class Page:
         """
         截图
         """
-        data = self.send("Page.captureScreenshot")  #png
+        data = self.send("Page.captureScreenshot")  # png
         data = base64.b64decode(data["result"]["data"])
         img = PIL.Image.open(io.BytesIO(data))
         if path:
             img.save(path)
         return img
-
 
     @cost_time
     def click(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
@@ -286,7 +284,6 @@ class Element:
             if time.time() - t1 > timeout:
                 raise ValueError(f"元素未启用：{self.id}")
             time.sleep(0.1)
-
 
     def is_selected(self):
         return self.cdp.execute_script(f"{self.id}.selected == true")

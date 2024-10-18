@@ -14,6 +14,7 @@ import sys
 import time
 
 import adbutils
+import psutil
 import requests
 
 from ha4t.utils.log_utils import log_out
@@ -39,6 +40,7 @@ class Server:
     """
     window系统进程管理类，主要用于管理服务进程
     """
+
     def kill_dead_servers(self, port):
         if pid := self.get_port_exists(port):
             log_out(f"正在结束本机进程 {port}, pid {pid}")
@@ -47,6 +49,45 @@ class Server:
             while self.pid_exists(pid):
                 time.sleep(0.1)
             log_out(f"进程 {port} 已结束, pid {pid}")
+
+    def kill_pid(self, pid):
+        print(f"正在结束本机进程  pid {pid}")
+        cmd = f"taskkill /f /pid {pid}"
+        subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        while self.pid_exists(pid):
+            time.sleep(0.1)
+        print(f"id {pid} kill success")
+
+    @classmethod
+    def find_process_by_name(cls, name):
+        """
+        根据进程名查找进程
+        :param name:
+        :return:
+        """
+        list_process = []
+        seen = {}  # 用于记录已经添加过的进程，格式为 {(pid, port): True}
+
+        for proc in psutil.process_iter(['pid', 'name']):
+            if name in proc.info['name']:
+                try:
+                    pid = proc.info['pid']
+                    process = psutil.Process(pid)
+                    connections = process.net_connections()
+                    for conn in connections:
+                        if conn.status == psutil.CONN_LISTEN:
+                            # 检查是否已经添加过该进程的该端口
+                            if (pid, conn.laddr.port) not in seen:
+                                seen[(pid, conn.laddr.port)] = True  # 标记为已添加
+                                list_process.append({
+                                    "pid": pid,
+                                    "name": proc.info['name'],
+                                    "port": conn.laddr.port
+                                })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        return list_process
 
     @staticmethod
     def get_pid_by_port(port):
@@ -140,27 +181,49 @@ class CdpServer(Server):
         self.ws_endpoint = f"http://localhost:{port}"
         return None
 
-    def start_server_for_ios_app(self, port=9222, timeout=10):
+    def start_server_for_ios_app(self, port=9222, timeout=10, use_existing_port=True):
         """
         开启ios app cdp服务
+        :param use_existing_port:
         :param port: 端口
         :param timeout: 超时时间
         """
-        can_start = self.can_start_server(port)
-        adapptools_path = os.path.join(get_adapter_path(), "remotedebug_ios_webkit_adapter")
+        # 使用已经存在的端口，不启动新的进程
+        if use_existing_port:
+            log_out("正在获取ios_webkit_adapter进程和端口")
+            ios_webkit_adapter_list = self.find_process_by_name("remotedebug_ios_webkit_adapter")
+            if ios_webkit_adapter_list:
+                self.ws_endpoint = f"http://localhost:{ios_webkit_adapter_list[0]['port']}"
+                self.adapter_pid = ios_webkit_adapter_list[0]["pid"]
+                log_out(
+                    f"ios_webkit_adapter 进程 {self.adapter_pid} 已存在,"
+                    f"使用已存在的端口 port:{ios_webkit_adapter_list[0]['port']}"
+                    f"，如需重启请设置use_existing_port=False")
+                return
+            else:
+                log_out("未找到ios_webkit_adapter进程，尝试启动")
 
-        if can_start:
-            server = subprocess.Popen([adapptools_path, f"--port={str(port)}"],
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,shell=True)
-            self.wait_connect(port, timeout)
-            self.ws_endpoint = f"http://localhost:{port}"
-            log_out(f"CDP端口转发成功，端口：{port}")
-            self.adapter_pid = server.pid
-            return server
+        # 结束已存在的端口
+        log_out("正在查找ios_webkit_debug_proxy进程是否存在")
+        p_list = self.find_process_by_name('ios_webkit_debug_proxy')
+        if p_list:
+            log_out("发现ios_webkit_debug_proxy进程，准备结束")
+            for i in p_list:
+                self.kill_dead_servers(i['pid'])
+        else:
+            log_out("未发现ios_webkit_debug_proxy进程")
+
+        # 启动服务
+        server = subprocess.Popen(
+            [os.path.join(get_adapter_path(), "remotedebug_ios_webkit_adapter"), f"--port={str(port)}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+        self.wait_connect(port, timeout)
         self.ws_endpoint = f"http://localhost:{port}"
-        return None
+        log_out(f"CDP端口转发成功，端口：{port}")
+        self.adapter_pid = server.pid
 
-    def start_server_for_windows_app(self, app_path: str, port=9222, reset=False, user_data_dir=None, timeout=10, lang="zh-CN"):
+    def start_server_for_windows_app(self, app_path: str, port=9222, reset=False, user_data_dir=None, timeout=10,
+                                     lang="zh-CN"):
         """
         开启windows app cdp服务
         :param app_path: 应用路径
@@ -212,7 +275,6 @@ class CdpServer(Server):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.adapter_pid:
             subprocess.Popen(f"kill -9 {self.adapter_pid}", shell=True)
-
 
 
 if __name__ == '__main__':

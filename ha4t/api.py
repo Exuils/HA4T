@@ -97,6 +97,10 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
             pos = match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
                              threshold=kwargs.get("threshold", 0.8))
             perform_click(*pos, duration)
+        elif isinstance(args[0], Template):
+            pos = match_loop(screenshot_func=driver.screenshot, template=args[0].filepath,
+                             timeout=kwargs.get("timeout", 10), threshold=kwargs.get("threshold", 0.8))
+            perform_click(*pos, duration)
     elif kwargs.get("image"):
         path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
         pos = match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
