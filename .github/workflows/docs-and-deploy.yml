@@ -32,14 +32,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r docs/requirements.txt
           pip install -r requirements.txt
-          
-      - name: 生成 API 文档
-        run: |
-          sphinx-apidoc -o docs/source/modules ../ha4t/ --extensions EXTENSIONS -e
+        
           
       - name: 构建文档
         run: |
           cd docs
+          sphinx-apidoc -o docs/source/modules ../ha4t/ --extensions EXTENSIONS -e
           make html
 
       - name: Setup Pages
