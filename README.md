@@ -1,7 +1,7 @@
 # HA4T 🐍
 
 [![PyPI version](https://badge.fury.io/py/ha4t.svg)](https://badge.fury.io/py/ha4t)
-[![Documentation Status](https://1103837067.github.io/HA4T/index.html#)]
+[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen)](https://1103837067.github.io/HA4T/)
 
 HA4T (Hybrid App Automation Testing Tool)
 是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于aircv、飞浆OCR、CDP、uiautomator2和facebook_wda进行开发。
