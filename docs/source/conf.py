@@ -38,6 +38,15 @@ master_doc = 'index'
 project = 'HA4T'
 copyright = '2024, caishilong'
 author = 'caishilong'
+version = u''  # 主要版本号
+release = u''  # 完整版本号
+
+# 代码高亮
+pygments_style = 'sphinx'
+
+# 显示 todo 列表
+todo_include_todos = True
+
 
 # 语言设置
 language = 'zh_CN'
@@ -55,10 +64,31 @@ napoleon_use_rtype = True
 # locale_dirs = ['locale/']
 # gettext_compact = False
 
+# Read the Docs 主题配置
 html_context = {
-    "display_github": True, # 显示 GitHub 链接
-    "github_user": "Exuils", # 你的 GitHub 用户名
-    "github_repo": "HA4T", # 你的 GitHub 仓库名
-    "github_version": "main", # 分支名，通常是 main 或 master
-    "conf_py_path": "/docs/source/", # conf.py 文件所在的路径
+    "display_github": True,
+    "github_user": "Exuils",
+    "github_repo": "HA4T",
+    "github_version": "main",
+    "conf_py_path": "/docs/source/",
+    "current_language": "zh_CN",
+    "current_version": version,
 }
+
+latex_documents = [
+    (master_doc, 'HA4T.tex', u'HA4T Documentation',
+     u'caishilong', 'manual'),
+]
+
+# 手册页输出配置
+man_pages = [
+    (master_doc, 'ha4t', u'HA4T Documentation',
+     [author], 1)
+]
+
+# Texinfo 输出配置
+texinfo_documents = [
+    (master_doc, 'HA4T', u'HA4T Documentation',
+     author, 'HA4T', 'One line description of project.',
+     'Miscellaneous'),
+]
