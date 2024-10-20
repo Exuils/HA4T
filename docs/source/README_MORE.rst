@@ -27,22 +27,38 @@ You can also install it from Git repository.
 ------------
 .. code-block:: python
 
-   from ha4t.api import *
-   
-   # 连接设备  
-   device = Device("android")
-   
-   # 启动应用
-   start_app("com.example.app")
-   
-   # 点击元素
-   click("登录")
-   
-   # 输入文本
-   input("用户名", "testuser")
-   
-   # 等待元素出现
-   wait("登录成功")
-   
-   # 断言文本存在
-   assert "欢迎回来" in get_page_text()
+    # 原生定位
+    from ha4t import connect
+    from ha4t.api import *
+
+    connect(platform="android")
+
+    # 启动应用
+    start_app(activity="com.xxx.xxx.MainActivity",app_name="com.xxx.xxx")
+
+    # 等待
+    wait(text="添加新项目",timeout=30)
+
+    # orc 文字识别定位 中/英
+    click("添加新项目")
+    # 图像匹配定位
+    click(image = "./添加新项目.png")
+    from ha4t.aircv.cv import Template
+    click(Template("./添加新项目.png"))
+    # u2 元素定位
+    click(text="添加新项目")
+
+
+    # webview 定位
+    from ha4t.cdp.cdp import CDP
+    from ha4t.cdp.server import CdpServer
+    from ha4t.cdp.by import By
+
+    cdp_server = CdpServer()
+    cdp_server.start_server_for_android_app(device.driver.adb_device)
+    cdp = CDP(cdp_server.ws_endpoint)
+
+
+    window = cdp.get_page(["homePage"])
+    time.sleep(3)
+    window.click((By.TEXT, "新建项目"))

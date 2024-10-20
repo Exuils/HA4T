@@ -22,7 +22,7 @@ from ha4t.config import Config as _CF
 from ha4t.orc import OCR
 from ha4t.utils.files_operat import get_file_list as _get_file_list
 from ha4t.utils.log_utils import log_out, cost_time
-from ha4t import  screen_size,driver
+from ha4t import  screen_size, device
 
 logreset.reset_logging()  # paddleocr 会污染 logging
 ocr = OCR()
@@ -50,9 +50,9 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
         :param duration: 点击持续时间
         """
         if _CF.PLATFORM == "ios":
-            driver.tap_hold(x, y, duration=duration)
+            device.driver.tap_hold(x, y, duration=duration)
         else:
-            driver.long_click(x, y, duration=duration)
+            device.driver.long_click(x, y, duration=duration)
 
     if args:
         if isinstance(args[0], tuple):
@@ -61,27 +61,27 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
             elif isinstance(args[0][0], str):
                 raise NotImplementedError("webview点击暂不支持")
         elif isinstance(args[0], str):
-            pos = ocr.get_text_pos(args[0], driver.screenshot, index=args[1] if len(args) > 1 else 0)
+            pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0)
             perform_click(*pos, duration)
         elif isinstance(args[0], dict):
             path = os.path.join(_CF.CURRENT_PATH, args[0]["image"])
-            pos = match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+            pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
                              threshold=kwargs.get("threshold", 0.8))
             perform_click(*pos, duration)
         elif isinstance(args[0], Template):
-            pos = match_loop(screenshot_func=driver.screenshot, template=args[0].filepath,
+            pos = match_loop(screenshot_func=device.driver.screenshot, template=args[0].filepath,
                              timeout=kwargs.get("timeout", 10), threshold=kwargs.get("threshold", 0.8))
             perform_click(*pos, duration)
     elif kwargs.get("image"):
         path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
-        pos = match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+        pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
                          threshold=kwargs.get("threshold", 0.8))
         perform_click(*pos, duration)
     else:
         if _CF.PLATFORM == "ios":
-            driver(**kwargs).tap_hold(duration=duration)
+            device.driver.tap_hold(duration=duration)
         else:
-            driver(**kwargs).long_click(duration=duration)
+            device.driver.long_click(duration=duration)
 
 
 def _exists(*args, **kwargs) -> bool:
@@ -105,7 +105,7 @@ def _exists(*args, **kwargs) -> bool:
                 raise NotImplementedError("webview点击暂不支持")
         elif isinstance(args[0], str):
             try:
-                pos = ocr.get_text_pos(args[0], driver.screenshot, index=args[1] if len(args) > 1 else 0, timeout=1)
+                pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0, timeout=1)
                 return True
             except:
                 return False
@@ -113,14 +113,14 @@ def _exists(*args, **kwargs) -> bool:
         elif isinstance(args[0], dict):
             path = os.path.join(_CF.CURRENT_PATH, args[0]["image"])
             try:
-                match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+                match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
                            threshold=kwargs.get("threshold", 0.8))
                 return True
             except:
                 return False
         elif isinstance(args[0], Template):
             try:
-                match_loop(screenshot_func=driver.screenshot, template=args[0].filepath,
+                match_loop(screenshot_func=device.driver.screenshot, template=args[0].filepath,
                            timeout=kwargs.get("timeout", 10),
                            threshold=kwargs.get("threshold", 0.8))
                 return True
@@ -129,14 +129,14 @@ def _exists(*args, **kwargs) -> bool:
     else:
         if kwargs.get("image"):
             path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
-            pos = match_loop(screenshot_func=driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+            pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
                              threshold=kwargs.get("threshold", 0.8))
             if pos:
                 return True
             else:
                 return False
         else:
-            return driver(**kwargs).exists
+            return device.driver(**kwargs).exists
 
 
 @cost_time
@@ -226,7 +226,7 @@ def swipe(p1, p2, duration=None, steps=None):
 
     pos1 = calculate_position(p1)
     pos2 = calculate_position(p2)
-    driver.swipe(*pos1, *pos2, duration=duration, steps=steps)
+    device.driver.swipe(*pos1, *pos2, duration=duration, steps=steps)
 
 
 def get_page_text() -> str:
@@ -236,7 +236,7 @@ def get_page_text() -> str:
     
     :return: 页面上的所有文字拼接成的字符串
     """
-    return ocr.get_page_text(driver.screenshot)
+    return ocr.get_page_text(device.driver.screenshot)
 
 
 @cost_time
@@ -310,7 +310,7 @@ def screenshot(filename: Optional[str] = None) -> PIL.Image.Image:
         >>> img = screenshot()  # 截图并不保存
         >>> screenshot("screenshot.png")  # 截图并保存为文件
     """
-    img = driver.screenshot()
+    img = device.driver.screenshot()
     img = PIL.Image.fromarray(img) if isinstance(img, np.ndarray) else img
     if filename:
         img.save(filename)
@@ -336,7 +336,7 @@ def home() -> None:
     :Example:
         >>> home()  # 返回主屏幕
     """
-    driver.press("home")
+    device.driver.press("home")
 
 
 @cost_time
@@ -487,12 +487,12 @@ def start_app(app_name: Optional[str] = None, activity: Optional[str] = None) ->
     app_name = app_name or _CF.APP_NAME
 
     if _CF.PLATFORM == "ios":
-        driver.app_start(app_name)
+        device.driver.app_start(app_name)
     else:
         activity = activity or _CF.ANDROID_ACTIVITY_NAME
         if activity is None:
             raise ValueError("Android平台必须提供activity参数")
-        driver.adb_device.app_start(app_name, activity)
+        device.driver.adb_device.app_start(app_name, activity)
 
 
 def restart_app(app_name: Optional[str] = None, activity: Optional[str] = None) -> None:
@@ -502,7 +502,7 @@ def restart_app(app_name: Optional[str] = None, activity: Optional[str] = None) 
     :Example:
         >>> restart_app()  # 重启当前应用
     """
-    driver.app_stop(app_name)
+    device.driver.app_stop(app_name)
     start_app(app_name, activity)
 
 

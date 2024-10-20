@@ -207,7 +207,7 @@ class CdpServer(Server):
         self.adapter_pid = None
 
     @staticmethod
-    def check_port_connection(port, timeout=10) -> bool:
+    def _check_port_connection(port, timeout=10) -> bool:
         """
         检查端口连接
 
@@ -223,7 +223,7 @@ class CdpServer(Server):
         except requests.RequestException:
             return False
 
-    def can_start_server(self, port) -> bool:
+    def _can_start_server(self, port) -> bool:
         """
         检查是否可以启动服务器
 
@@ -232,7 +232,7 @@ class CdpServer(Server):
         :Example:
             >>> can_start = cdp_server.can_start_server(9222)  # 检查是否可以启动9222端口的服务器
         """
-        if self.check_port_connection(port):
+        if self._check_port_connection(port):
             log_out(f"端口{port}已存在")
             if self.ignore_exist_port:
                 log_out(f"忽略端口{port}，继续测试")
@@ -247,14 +247,13 @@ class CdpServer(Server):
     def start_server_for_android_app(self, adb: adbutils.AdbDevice, port=9222, timeout=10) -> None:
         """
         开启android app cdp服务
-
         :param adb: adb设备
         :param port: 端口
         :param timeout: 超时时间
         :Example:
             >>> cdp_server.start_server_for_android_app(adb_device, port=9222)  # 启动Android应用的CDP服务
         """
-        can_start = self.can_start_server(port)
+        can_start = self._can_start_server(port)
         if can_start:
             rs: str = adb.shell(['grep', '-a', 'webview_devtools_remote', '/proc/net/unix'])
             end = rs.split("@")[-1]
@@ -325,7 +324,7 @@ class CdpServer(Server):
         :Example:
             >>> cdp_server.start_server_for_windows_app("C:/path/to/app.exe", port=9222)  # 启动Windows应用的CDP服务
         """
-        can_start = self.can_start_server(port=port)
+        can_start = self._can_start_server(port=port)
         if can_start:
             start_app_args = [app_path, f"--remote-debugging-port={port}"]
             print(reset)
@@ -355,7 +354,6 @@ class CdpServer(Server):
         return None
 
     def start_server_for_mac_app(self, file_path: str, port=9222) -> None:
-        # 这里需要根据macOS的具体情况实现
         """
         TODO: 这里需要根据macOS的具体情况实现
         :param file_path: 应用路径

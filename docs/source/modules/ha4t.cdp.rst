@@ -7,6 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   ha4t.cdp.by
    ha4t.cdp.cdp
    ha4t.cdp.jsCode
    ha4t.cdp.server

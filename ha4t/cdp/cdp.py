@@ -4,27 +4,25 @@
 # @文件名      : cdp.py
 # @Software   : PyCharm
 """
-CDPClient 类用于与 Chrome DevTools Protocol (CDP) 进行通信。它通过 WebSocket 连接到浏览器的调试端口，并发送 CDP 命令以控制浏览器。
+CDP 类用于与 Chrome DevTools Protocol (CDP) 进行通信。它通过 WebSocket 连接到浏览器的调试端口，并发送 CDP 命令以控制浏览器。
 
 该模块提供了与浏览器进行交互的功能，包括发送命令、接收响应、获取页面元素等。
 
 **使用示例：**
 
-1. 创建 WS_CDP 实例并连接到浏览器：
+1. 创建 WS_CDP 实例：   
    ```python
-   client = WS_CDP("ws://localhost:9222/devtools/browser/<id>")
-   await client.connect()
+   cdp = CDP("ws://localhost:9222")
    ```
 
-2. 发送命令并获取响应：
+2. 输入page标题匹配连接：
    ```python
-   response = await client.send_command("Page.navigate", {"url": "https://www.example.com"})
+   page = cdp.get_page("homepage")
    ```
 
 3. 使用 Page 类与浏览器窗口交互：
    ```python
-   page = Page(client.ws_endpoint)
-   title = page.get_title()
+   page.click(("css selector","#element_id"))
    ```
 
 4. 获取元素并进行操作：
@@ -64,6 +62,7 @@ class _WS_CDP:
     def __init__(self, url):
         self.ws_endpoint = url
         self.ws = None
+        self.command_counter = 0  # 用于生成唯一命令 ID
 
     async def connect(self):
         """
@@ -114,15 +113,12 @@ class _WS_CDP:
             if time.time() - t1 > timeout:
                 raise ValueError(f"Command {command_id} timed out.")
 
-    @staticmethod
-    def _next_command_id():
+    def _next_command_id(self):
         """
         生成下一个命令 ID。
-
-        :return: 下一个命令 ID
         """
-        # 这里简单返回一个固定值，实际使用时可能需要更复杂的逻辑来确保唯一性
-        return 1
+        self.command_counter += 1
+        return self.command_counter
 
     async def close(self):
         """
@@ -197,7 +193,7 @@ class Page:
         :Example:
             >>> result = Page().send("Page.navigate", {"url": "https://www.example.com"})
         """
-        self.task_queue.put(self.command(method, params))
+        self.task_queue.put((method, params))
         t1 = time.time()
         while True:
             try:
@@ -217,39 +213,45 @@ class Page:
         :param script: 要执行的 JavaScript 脚本
         :return: 执行结果
         :Example:
-            >>> result = Page().execute_script("return document.title;")
+            >>> result = Page().execute_script("document.title;")
         """
-        rs = self.send("Runtime.evaluate", {"expression": script, "returnByValue": True})
         try:
-            rs = rs["result"]["result"]["value"]
-        except:
-            pass
-        return rs
+            rs = self.send("Runtime.evaluate", {"expression": script, "returnByValue": True})
+            return rs["result"]["result"]["value"]
+        except Exception as e:
+            log_out(f"执行脚本时出错: {e}")
+            return None
 
-    def get_element(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
+    def get_element(self, locator: tuple, timeout=CF.FIND_TIMEOUT) -> 'Element':
         """
-        获取页面元素。
-
+        获取页面元素并返回 Element 实例。
         :param locator: 元素定位器，格式为元组，例如 ("css selector", "#element_id")
         :param timeout: 超时时间，默认为配置中的 FIND_TIMEOUT
         :return: Element 实例
         :raises ValueError: 如果元素定位失败
         :Example:
             >>> element = Page().get_element(("css selector", "#element_id"))
+        
+        """
+        element_id = self._find_element_id(locator, timeout)
+        return Element(self, element_id)
+
+    def _find_element_id(self, locator: tuple, timeout: int) -> str:
+        """
+        内部方法，用于查找元素 ID。
         """
         t1 = time.time()
         while True:
             try:
                 element_id = f"TEMP_{str(int(time.time()))}"
-                exists = self.execute_script(
-                    JS.element_exists(locator=locator, var_name=element_id))
-                if not exists:
+                exists = self.execute_script(JS.element_exists(locator=locator, var_name=element_id))
+                if exists:
+                    return element_id
+                if time.time() - t1 > timeout:
                     raise ValueError(f"元素定位失败：{locator}")
-                break
             except Exception as e:
                 if time.time() - t1 > timeout:
                     raise e
-        return Element(self, element_id)
 
     def get_title(self):
         """
@@ -403,17 +405,17 @@ class CDP:
 
 
 class Element:
-    def __init__(self, cdp: Page, element_id):
+    def __init__(self, page: Page, element_id: str):
         """
         元素类，用于与页面元素进行交互。
 
-        :param cdp: Page 实例
+        :param page: Page 实例
         :param element_id: 元素 ID
         :Example:
             >>> element = Element(Page(), "element_id")
         """
-        self.cdp = cdp
-        self.id = element_id
+        self._page = page
+        self._id = element_id
 
     @cost_time
     def click(self):
@@ -422,7 +424,7 @@ class Element:
         :Example:
             >>> Element.click()
         """
-        self.cdp.execute_script(JS.add_click(self.id))
+        self._page.execute_script(JS.add_click(self._id))
 
     def exists(self) -> bool:
         """
@@ -432,7 +434,7 @@ class Element:
         :Example:
             >>> is_exist = Element.exists()
         """
-        return self.cdp.execute_script(f"{self.id} != null")
+        return self._page.execute_script(f"{self._id} != null")
 
     def is_displayed(self) -> bool:
         """
@@ -442,7 +444,7 @@ class Element:
         :Example:
             >>> visible = Element.is_displayed()
         """
-        return self.cdp.execute_script(f"{self.id}.style.display != 'none'")
+        return self._page.execute_script(f"{self._id}.style.display != 'none'")
 
     def is_enabled(self) -> bool:
         """
@@ -452,7 +454,7 @@ class Element:
         :Example:
             >>> enabled = Element.is_enabled()
         """
-        return self.cdp.execute_script(f"{self.id}.disabled == false")
+        return self._page.execute_script(f"{self._id}.disabled == false")
 
     def wait_util_enabled(self, timeout=10):
         """
@@ -468,7 +470,7 @@ class Element:
             if self.is_enabled():
                 break
             if time.time() - t1 > timeout:
-                raise ValueError(f"元素未启用：{self.id}")
+                raise ValueError(f"元素未启用：{self._id}")
             time.sleep(0.1)
 
     def is_selected(self) -> bool:
@@ -479,7 +481,7 @@ class Element:
         :Example:
             >>> selected = Element.is_selected()
         """
-        return self.cdp.execute_script(f"{self.id}.selected == true")
+        return self._page.execute_script(f"{self._id}.selected == true")
 
     def get_text(self) -> str:
         """
@@ -489,7 +491,7 @@ class Element:
         :Example:
             >>> text = Element.get_text()
         """
-        return self.cdp.execute_script(f"{self.id}.innerText")
+        return self._page.execute_script(f"{self._id}.innerText")
 
     def set_text(self, text: str):
         """
@@ -499,7 +501,7 @@ class Element:
         :Example:
             >>> Element.set_text("新文本")
         """
-        self.cdp.execute_script(f"{self.id}.value='{text}'")
+        self._page.execute_script(f"{self._id}.value='{text}'")
 
     def get_attribute(self, attribute: str) -> Any:
         """
@@ -510,7 +512,7 @@ class Element:
         :Example:
             >>> value = Element.get_attribute("class")
         """
-        return self.cdp.execute_script(f"{self.id}.{attribute}")
+        return self._page.execute_script(f"{self._id}.{attribute}")
 
     def set_attribute(self, attribute: str, value: Any):
         """
@@ -521,7 +523,7 @@ class Element:
         :Example:
             >>> Element.set_attribute("class", "new-class")
         """
-        self.cdp.execute_script(f"{self.id}.{attribute}='{value}'")
+        self._page.execute_script(f"{self._id}.{attribute}='{value}'")
 
     def get_property(self, prop: str) -> Any:
         """
@@ -532,7 +534,7 @@ class Element:
         :Example:
             >>> value = Element.get_property("value")
         """
-        return self.cdp.execute_script(f"{self.id}.{prop}")
+        return self._page.execute_script(f"{self._id}.{prop}")
 
     def set_property(self, prop: str, value: Any):
         """
@@ -543,7 +545,7 @@ class Element:
         :Example:
             >>> Element.set_property("value", "新值")
         """
-        self.cdp.execute_script(f"{self.id}.{prop}='{value}'")
+        self._page.execute_script(f"{self._id}.{prop}='{value}'")
 
     def get_value(self) -> Any:
         """
@@ -553,7 +555,7 @@ class Element:
         :Example:
             >>> value = Element.get_value()
         """
-        return self.cdp.execute_script(f"{self.id}.value")
+        return self._page.execute_script(f"{self._id}.value")
 
     def set_value(self, value: Any):
         """
@@ -563,7 +565,8 @@ class Element:
         :Example:
             >>> Element.set_value("新值")
         """
-        self.cdp.execute_script(f"{self.id}.value='{value}'")
+        self._page.execute_script(f"{self._id}.value='{value}'")
 
 if __name__ == '__main__':
     pass
+

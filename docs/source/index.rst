@@ -57,6 +57,7 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
 
    modules/ha4t.cdp.cdp
    modules/ha4t.cdp.server
+   modules/ha4t.cdp.by
 
 ================================
 
