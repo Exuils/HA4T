@@ -54,3 +54,11 @@ napoleon_use_rtype = True
 # 如果需要支持多语言
 # locale_dirs = ['locale/']
 # gettext_compact = False
+
+html_context = {
+    "display_github": True, # 显示 GitHub 链接
+    "github_user": "Exuils", # 你的 GitHub 用户名
+    "github_repo": "HA4T", # 你的 GitHub 仓库名
+    "github_version": "main", # 分支名，通常是 main 或 master
+    "conf_py_path": "/docs/source/", # conf.py 文件所在的路径
+}
