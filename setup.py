@@ -48,7 +48,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     license='Apache License 2.0',
     url="https://github.com/exuils/HA4T",
-    install_requires=parse_requirements(r'D:\projects\HA4T\requirements.txt'),
+    install_requires=parse_requirements(r'D:\project\nico\HA4T\requirements.txt'),
     packages=find_packages(exclude=("tests",)),
     keywords=['automation', 'automated-test', 'game', 'android', 'ios', "hybrid-app"],
     extras_require={

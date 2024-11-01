@@ -1,4 +1,4 @@
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 __all__ = ["__version__", "connect", "device", "Device", "screen_size"]
 
 import json
@@ -46,6 +46,8 @@ def connect(device_serial=None, android_package_name=None,
         device_serial = _CF.DEVICE_SERIAL
     if not platform:
         platform = _CF.PLATFORM
+    else:
+        _CF.PLATFORM = platform
     device.connect(platform, device_serial)
     screen_size = device.driver.window_size()
     _CF.SCREEN_WIDTH, _CF.SCREEN_HEIGHT = screen_size
