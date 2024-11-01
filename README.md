@@ -4,7 +4,9 @@
 [![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen)](https://exuils.github.io/HA4T/)
 
 HA4T (Hybrid App For Testing Tool)
-是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于airtest、飞浆OCR、WS、uiautomator2和facebook_wda进行开发。
+是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于airtest
+aircv模块、飞浆OCR、WS、uiautomator2和facebook_wda进行开发。
+(目前仅个人开发和使用，可能存在一些问题~)
 
 ## 特性
 
@@ -33,20 +35,20 @@ from ha4t.api import *
 connect(platform="android")
 
 # 启动应用
-start_app(activity="com.xxx.xxx.MainActivity",app_name="com.xxx.xxx")
+start_app(activity="com.xxx.xxx.MainActivity", app_name="com.xxx.xxx")
 
 # 等待
-wait(text="添加新项目",timeout=30)
+wait(text="添加新项目", timeout=30)
 
 # orc 文字识别定位 中/英
 click("添加新项目")
 # 图像匹配定位
-click(image = "./添加新项目.png")
+click(image="./添加新项目.png")
 from ha4t.aircv.cv import Template
+
 click(Template("./添加新项目.png"))
 # u2 元素定位
 click(text="添加新项目")
-
 
 # webview 定位
 from ha4t.cdp.cdp import CDP
@@ -57,7 +59,6 @@ cdp_server = CdpServer()
 cdp_server.start_server_for_android_app(device.driver.adb_device)
 cdp = CDP(cdp_server.ws_endpoint)
 
-
 window = cdp.get_page(["homePage"])
 time.sleep(3)
 window.click((By.TEXT, "新建项目"))
@@ -65,12 +66,11 @@ window.click((By.TEXT, "新建项目"))
 
 ## 详细文档(未完善)
 
-查看我们的[详细文档](https://exuils.github.io/HA4T/)以获取更多信息，包括：
+查看[详细文档](https://exuils.github.io/HA4T/)以获取更多信息，包括：
 
 - 完整的API参考
 - 高级用法指南
 - 最佳实践和技巧
-
 
 ## 问题和支持
 
@@ -90,5 +90,4 @@ HA4T 的开发得益于以下开源项目：
 - [paddleocr](https://github.com/PaddlePaddle/PaddleOCR)
 - [ios-webkit-debug-proxy](https://github.com/google/ios-webkit-debug-proxy)
 
-感谢这些项目的贡献者们！
-如果您觉得HA4T对您有帮助，请考虑给我们一个星标 ⭐️
+如果您觉得HA4T对您有帮助，请考虑给项目一个星标 ⭐️
