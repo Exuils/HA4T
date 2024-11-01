@@ -70,12 +70,12 @@ class Server:
             >>> server = Server()
             >>> server.kill_pid(1234)  # 结束PID为1234的进程
         """
-        print(f"正在结束本机进程  pid {pid}")
+        log_out(f"正在结束本机进程  pid {pid}")
         cmd = f"taskkill /f /pid {pid}"
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         while self.pid_exists(pid):
             time.sleep(0.1)
-        print(f"id {pid} kill success")
+        log_out(f"id {pid} kill success")
 
     @classmethod
     def find_process_by_name(cls, name: str) -> list:
@@ -266,7 +266,7 @@ class CdpServer(Server):
         self.ws_endpoint = f"http://localhost:{port}"
         return None
 
-    def start_server_for_ios_app(self, port=9222, timeout=10, use_existing_port=True) -> None:
+    def start_server_for_ios_app(self, port=9222, timeout=10) -> None:
         """
         开启ios app cdp服务
 
@@ -276,28 +276,15 @@ class CdpServer(Server):
         :Example:
             >>> cdp_server.start_server_for_ios_app(port=9222)  # 启动iOS应用的CDP服务
         """
-        # 使用已经存在的端口，不启动新的进程
-        if use_existing_port:
-            log_out("正在获取ios_webkit_adapter进程和端口")
-            ios_webkit_adapter_list = self.find_process_by_name("remotedebug_ios_webkit_adapter")
-            if ios_webkit_adapter_list:
-                self.ws_endpoint = f"http://localhost:{ios_webkit_adapter_list[0]['port']}"
-                self.adapter_pid = ios_webkit_adapter_list[0]["pid"]
-                log_out(
-                    f"ios_webkit_adapter 进程 {self.adapter_pid} 已存在,"
-                    f"使用已存在的端口 port:{ios_webkit_adapter_list[0]['port']}"
-                    f"，如需重启请设置use_existing_port=False")
-                return
-            else:
-                log_out("未找到ios_webkit_adapter进程，尝试启动")
 
         # 结束已存在的端口
+        self.kill_dead_servers(port)
         log_out("正在查找ios_webkit_debug_proxy进程是否存在")
         p_list = self.find_process_by_name('ios_webkit_debug_proxy')
         if p_list:
-            log_out("发现ios_webkit_debug_proxy进程，准备结束")
+            log_out(f"发现ios_webkit_debug_proxy进程，准备结束")
             for i in p_list:
-                self.kill_dead_servers(i['pid'])
+                self.kill_pid(i['pid'])
         else:
             log_out("未发现ios_webkit_debug_proxy进程")
 

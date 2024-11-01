@@ -61,7 +61,7 @@ JS = Jscript()
 class _WS_CDP:
     def __init__(self, url):
         self.ws_endpoint = url
-        self.ws = None
+        self.ws: websockets.WebSocketClientProtocol = None
         self.command_counter = 0  # 用于生成唯一命令 ID
 
     async def connect(self):
@@ -71,7 +71,7 @@ class _WS_CDP:
         self.ws = await websockets.connect(self.ws_endpoint)
         log_out(f"ws_endpoint: {self.ws_endpoint} connected!")
 
-    async def send_command(self, method, params=None):
+    async def send_command(self, method: str, params: dict = None) -> dict:
         """
         发送 CDP 命令到浏览器，并等待响应。
 
@@ -95,12 +95,12 @@ class _WS_CDP:
         await self.ws.send(json.dumps(command))
         return await self._wait_for_response(command_id)
 
-    async def _wait_for_response(self, command_id, timeout=5):
+    async def _wait_for_response(self, command_id, timeout=1):
         """
         等待具有指定 ID 的响应。
 
         :param command_id: 命令 ID
-        :param timeout: 超时时间，默认为 5 秒
+        :param timeout: 超时时间，默认为 1 秒
         :return: 响应结果
         :raises ValueError: 如果超时
         """
@@ -128,15 +128,15 @@ class _WS_CDP:
             await self.ws.close()
 
 
-def _worker(url, task_queue, result_queue, timeout=10):
+def _worker(url, task_queue, result_queue):
     """
     工作线程，用于处理任务队列中的命令。
 
     :param url: WebSocket 地址
     :param task_queue: 任务队列
     :param result_queue: 结果队列
-    :param timeout: 超时时间，默认为 10 秒
     """
+
     async def main():
         client = _WS_CDP(url)
         try:
@@ -149,7 +149,7 @@ def _worker(url, task_queue, result_queue, timeout=10):
                 if task is None:
                     break
                 method, params = task
-                result = await asyncio.wait_for(client.send_command(method, params), timeout=timeout)
+                result = await client.send_command(method, params)
                 result_queue.put(result)
             except Exception as e:
                 result_queue.put(e)
@@ -158,8 +158,9 @@ def _worker(url, task_queue, result_queue, timeout=10):
 
     asyncio.run(main())
 
+
 class Page:
-    def __init__(self, ws):
+    def __init__(self, ws, wait_page_ready_timeout=30):
         """
         窗口类，用于与浏览器窗口进行交互。
 
@@ -167,12 +168,15 @@ class Page:
         :Example:
             >>> page = Page("ws://localhost:9222/devtools/page/<id>")
         """
+        self.wait_page_ready_timeout = wait_page_ready_timeout
         self.ws = ws
         self.task_queue = queue.Queue()
         self.result_queue = queue.Queue()
         self.thread = threading.Thread(target=_worker, args=(self.ws, self.task_queue, self.result_queue))
         self.thread.daemon = True
         self.thread.start()
+        log_out(f"等待3s，等待socket连接成功")
+        time.sleep(3)  # 等待线程启动
 
     def restart(self):
         """
@@ -181,22 +185,28 @@ class Page:
         self.close()
         self.__init__(self.ws)
 
-    def send(self, method, params=None, timeout=10):
+    def send(self, method, params=None, timeout=3):
         """
         发送命令到浏览器并获取结果。
 
         :param method: CDP 方法名
         :param params: 方法参数，默认为 None
-        :param timeout: 超时时间，默认为 10 秒
+        :param timeout: 超时时间，默认为 3 秒
         :return: 响应结果
         :raises ValueError: 如果超时
         :Example:
             >>> result = Page().send("Page.navigate", {"url": "https://www.example.com"})
         """
+        # 清空结果队列
+        while not self.result_queue.empty():
+            self.result_queue.get()
+
+        # 发送命令
         self.task_queue.put((method, params))
         t1 = time.time()
         while True:
             try:
+                # 等待结果
                 result = self.result_queue.get(block=True, timeout=1)
                 if isinstance(result, Exception):
                     raise result
@@ -217,10 +227,14 @@ class Page:
         """
         try:
             rs = self.send("Runtime.evaluate", {"expression": script, "returnByValue": True})
+            if "result" not in rs:
+                log_out(f"执行脚本失败，返回结果：{rs}", 2)
             return rs["result"]["result"]["value"]
-        except Exception as e:
-            log_out(f"执行脚本时出错: {e}")
+        # not such key
+        except KeyError:
             return None
+        except Exception as e:
+            raise e
 
     def get_element(self, locator: tuple, timeout=CF.FIND_TIMEOUT) -> 'Element':
         """
@@ -348,6 +362,7 @@ class Page:
         self.task_queue.put(None)
         self.thread.join()
 
+
 class CDP:
     def __init__(self, url="http://localhost:9222"):
         """
@@ -359,17 +374,18 @@ class CDP:
         """
         self.ws_url = url
 
-    def get_page(self, ws_title: str | list[str] = None, timeout=10) -> Page:
+    def get_page(self, ws_title: str | list[str] = None, timeout=30) -> Page:
         """
         获取页面实例。
 
         :param ws_title: 页面标题，可以是字符串或字符串列表
-        :param timeout: 超时时间，默认为 10 秒
+        :param timeout: 超时时间，默认为 30 秒
         :return: Page 实例
         :raises ValueError: 如果获取页面超时
         :Example:
             >>> page = CDP().get_page("页面标题")
         """
+        e = None
         t1 = time.time()
         while True:
             try:
@@ -388,7 +404,8 @@ class CDP:
             # 请求错误
             except requests.exceptions.RequestException as e:
                 raise e
-            except Exception:
+            except Exception as e:
+                log_out(e, 2)
                 pass
             if time.time() - t1 > timeout:
                 raise ValueError(f"获取页面超时")
@@ -491,7 +508,7 @@ class Element:
         :Example:
             >>> text = Element.get_text()
         """
-        return self._page.execute_script(f"{self._id}.innerText")
+        return self._page.execute_script(f"{self._id}.textContent")
 
     def set_text(self, text: str):
         """
@@ -567,6 +584,6 @@ class Element:
         """
         self._page.execute_script(f"{self._id}.value='{value}'")
 
+
 if __name__ == '__main__':
     pass
-

@@ -9,6 +9,7 @@ import logging
 import os
 import time
 
+import allure
 import colorlog
 
 from ha4t.config import Config as CF
@@ -26,6 +27,7 @@ log_colors_config = {
     'ERROR': 'red',
     'CRITICAL': 'bold_red',
 }
+
 
 class Logger:
     def __init__(self):
@@ -98,7 +100,6 @@ def log_out(msg, level=1):
         Log.error(msg)
 
 
-
 def cost_time(func):
     """
     计算函数运行时间，log打印每个操作事件耗时
@@ -110,12 +111,14 @@ def cost_time(func):
     def wrapper(*args, **kwargs):
         start_time = time.time()  # 记录开始时间
         try:
-            result = func(*args, **kwargs)  # 调用原始函数
-            log_out(f"动作：{func.__name__}-执行成功，参数：{args, *kwargs.values()}，耗时：{round(time.time() - start_time, 3)}秒")
+            with allure.step(f"动作：{func.__name__},参数：{args, *kwargs.values()}"):
+                result = func(*args, **kwargs)  # 调用原始函数
+            log_out(
+                f"动作：【{func.__name__}】-执行成功，参数：{args, *kwargs.values()}，耗时：{round(time.time() - start_time, 3)}秒")
             return result
         except Exception as e:
             log_out(
-                f"动作：{func.__name__}-执行失败，参数：{args, *kwargs.values()},耗时：{round(time.time() - start_time, 3)}秒 失败原因：{e}",
+                f"动作：【{func.__name__}】-执行失败，参数：{args, *kwargs.values()},耗时：{round(time.time() - start_time, 3)}秒 失败原因：{e}",
                 level=2)
             raise e
 

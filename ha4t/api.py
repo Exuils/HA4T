@@ -11,22 +11,21 @@
 import os
 import subprocess
 import time
-from typing import Optional, Union,  List
+from typing import Optional, Union, List
 
 import PIL.Image
 import logreset
 import numpy as np
 
+from ha4t import screen_size, device
 from ha4t.aircv.cv import match_loop, Template
 from ha4t.config import Config as _CF
 from ha4t.orc import OCR
 from ha4t.utils.files_operat import get_file_list as _get_file_list
 from ha4t.utils.log_utils import log_out, cost_time
-from ha4t import  screen_size, device
 
 logreset.reset_logging()  # paddleocr 会污染 logging
 ocr = OCR()
-
 
 
 @cost_time
@@ -56,6 +55,8 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
 
     if args:
         if isinstance(args[0], tuple):
+            if len(args[0]) == 0:
+                raise ValueError("参数不能是空元组")
             if isinstance(args[0][0], int):
                 perform_click(*args[0], duration)
             elif isinstance(args[0][0], str):
@@ -63,15 +64,16 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
         elif isinstance(args[0], str):
             pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0)
             perform_click(*pos, duration)
-        elif isinstance(args[0], dict):
-            path = os.path.join(_CF.CURRENT_PATH, args[0]["image"])
-            pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
-                             threshold=kwargs.get("threshold", 0.8))
             perform_click(*pos, duration)
         elif isinstance(args[0], Template):
             pos = match_loop(screenshot_func=device.driver.screenshot, template=args[0].filepath,
                              timeout=kwargs.get("timeout", 10), threshold=kwargs.get("threshold", 0.8))
             perform_click(*pos, duration)
+        elif isinstance(args[0], dict):
+            if _CF.PLATFORM == "ios":
+                device.driver(**args[0], **kwargs).tap_hold(duration=duration)
+            else:
+                device.driver(**args[0], **kwargs).long_click(duration=duration)
     elif kwargs.get("image"):
         path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
         pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
@@ -79,9 +81,9 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
         perform_click(*pos, duration)
     else:
         if _CF.PLATFORM == "ios":
-            device.driver.tap_hold(duration=duration)
+            device.driver(**kwargs).tap_hold(duration=duration)
         else:
-            device.driver.long_click(duration=duration)
+            device.driver(**kwargs).long_click(duration=duration)
 
 
 def _exists(*args, **kwargs) -> bool:
@@ -105,7 +107,8 @@ def _exists(*args, **kwargs) -> bool:
                 raise NotImplementedError("webview点击暂不支持")
         elif isinstance(args[0], str):
             try:
-                pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0, timeout=1)
+                pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0,
+                                       timeout=1)
                 return True
             except:
                 return False
@@ -447,7 +450,8 @@ def delete_file(file_path: Union[List[str], str]) -> None:
         result = subprocess.run(
             ["tidevice", "-u", _CF.DEVICE_SERIAL, "fsync", "-B", _CF.APP_NAME, "ls", f"Documents/{file_path}"],
             capture_output=True,
-            text=True
+            text=True,
+            encoding='utf-8'
         )
         return result.returncode == 0
 
@@ -473,7 +477,25 @@ def delete_file(file_path: Union[List[str], str]) -> None:
 
 
 @cost_time
-def start_app(app_name: Optional[str] = None, activity: Optional[str] = None) -> None:
+def clear_app(app_name: str = None):
+    """
+    清除应用数据
+    > 仅支持Android平台
+    :param app_name: 应用名称
+    :Example:
+        >>> clear_app("com.example.app")  # 清除应用数据
+    :return:
+    """
+    if _CF.PLATFORM == "android":
+        if app_name is None:
+            app_name = _CF.APP_NAME
+            device.driver.adb_device.app_clear(app_name)
+    else:
+        log_out(f"{clear_app.__name__}仅支持Android平台", 2)
+
+
+@cost_time
+def start_app(app_name: Optional[str] = _CF.APP_NAME, activity: Optional[str] = _CF.ANDROID_ACTIVITY_NAME) -> None:
     """
     启动应用程序
     
@@ -484,18 +506,33 @@ def start_app(app_name: Optional[str] = None, activity: Optional[str] = None) ->
     :Example:
         >>> start_app("com.example.app")  # 启动指定应用
     """
-    app_name = app_name or _CF.APP_NAME
 
     if _CF.PLATFORM == "ios":
+        if app_name is None:
+            raise ValueError("app_name不能为空")
         device.driver.app_start(app_name)
     else:
-        activity = activity or _CF.ANDROID_ACTIVITY_NAME
         if activity is None:
-            raise ValueError("Android平台必须提供activity参数")
+            raise ValueError("activity不能为空")
         device.driver.adb_device.app_start(app_name, activity)
 
 
-def restart_app(app_name: Optional[str] = None, activity: Optional[str] = None) -> None:
+def get_current_app() -> str:
+    """
+    获取当前运行的应用名称
+
+    :return: 应用bundleId 或 package name
+
+    :Example:
+        >>> get_current_app()  # 获取当前运行的应用名称
+    """
+    if _CF.PLATFORM == "ios":
+        return device.driver.app_current()["bundleId"]
+    else:
+        return device.driver.adb_device.app_current().package
+
+
+def restart_app(app_name: Optional[str] = _CF.APP_NAME, activity: Optional[str] = _CF.ANDROID_ACTIVITY_NAME) -> None:
     """
     重启应用程序并更新CDP连接
     
