@@ -574,7 +574,8 @@ new Vue({
     selectStep(i) { this.selectedStepIndex = i; },
     stepIcon(status) {
       const m = { pending: '○', running: '◐', ok: '●', fail: '✖' };
-      return m[status] || '○';
+      const cls = status ? 'icon-' + status : '';
+      return { icon: m[status] || '○', cls: cls };
     },
     async runSingleStep(i) {
       if (!this.isConnected) { this.$message({ message: 'Not connected', type: 'warning' }); return; }
@@ -761,11 +762,13 @@ new Vue({
       if (!m2) return;
       const action = m2[1], value = m2[2] || '';
       const code = this.stepToCode(action, value);
-      if (this.selectedStepIndex >= 0 && this.selectedStepIndex < this.steps.length) {
-        this.steps[this.selectedStepIndex].code = code;
-        this.steps[this.selectedStepIndex]._status = 'pending';
+      let idx = this.selectedStepIndex;
+      if (idx >= 0 && idx < this.steps.length) {
+        this.steps[idx].code = code;
+        this.steps[idx]._status = 'pending';
         this.saveCurrentTask();
       } else {
+        idx = this.steps.length;
         this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
         this.saveCurrentTask();
       }
@@ -773,6 +776,7 @@ new Vue({
       this.cliPrefix = '';
       this.selectedStepIndex = -1;
       this.slashVisible = false;
+      if (this.autoRun) this.runSingleStep(idx);
     },
     pickSlash(item) {
       if (item.isApp) {
@@ -822,11 +826,14 @@ new Vue({
       }
     },
     generateU2Selector(node) {
-      if (node.resourceId) return { key: 'resourceId', value: node.resourceId };
-      if (node.text) return { key: 'text', value: node.text };
-      if (node.description) return { key: 'description', value: node.description };
-      if (node._type) return { key: 'className', value: node._type };
-      return null;
+      const attrs = [];
+      if (node.resourceId) attrs.push(`resourceId="${node.resourceId}"`);
+      if (node.text) attrs.push(`text="${node.text}"`);
+      if (node.description) attrs.push(`description="${node.description}"`);
+      if (node._type) attrs.push(`className="${node._type}"`);
+      if (node.index !== undefined && node.index !== null && node.index >= 0) attrs.push(`index=${node.index}`);
+      if (attrs.length === 0) return null;
+      return attrs.join(', ');
     },
     insertStepFromElement() {
       if (!this.selectedNode) return;
@@ -839,10 +846,12 @@ new Vue({
         this.$message({ message: 'No usable selector found for this element', type: 'warning' });
         return;
       }
-      const code = `click(${sel.key}="${sel.value}")`;
+      const code = `click(${sel})`;
+      const idx = this.steps.length;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.saveCurrentTask();
       this.$message({ message: `Inserted: ${code}`, type: 'success' });
+      if (this.autoRun) this.runSingleStep(idx);
     }
   }
 });

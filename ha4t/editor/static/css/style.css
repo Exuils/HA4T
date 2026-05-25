@@ -269,10 +269,10 @@ code {
 }
 .step-row:hover { background: #2a3340; }
 .step-row.step-selected { background: #1a3a5c; }
-.step-row.step-running { background: #2a2a10; }
-.step-row.step-ok { background: #1a2a1a; }
-.step-row.step-fail { background: #3a1a1a; }
 .step-icon { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; }
+.step-icon.icon-ok { color: #67c23a; }
+.step-icon.icon-fail { color: #f56c6c; }
+.step-icon.icon-running { color: #e6a23c; }
 .step-num { color: #666; min-width: 22px; flex-shrink: 0; }
 .step-code {
   color: #e0e0e0;

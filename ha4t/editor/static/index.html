@@ -10,11 +10,8 @@
 
 </head>
 <body>
-    <div
-        id="app"
-        v-loading="isConnecting || isDumping"
-        element-loading-spinner="el-icon-loading"
-        element-loading-background="rgba(0, 0, 0, 0.7)">
+    <div id="app">
+        <div class="header">
 
         <div class="header">
             <div style="margin-right: 20px;">
@@ -103,7 +100,10 @@
 
         </div>
         <div class="main">
-            <div class="left">
+            <div class="left"
+                v-loading="isConnecting || isDumping || isRunning"
+                element-loading-spinner="el-icon-loading"
+                element-loading-background="rgba(0, 0, 0, 0.7)">  
                 <canvas id="screenshotCanvas"></canvas>
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
@@ -185,15 +185,14 @@
                         </div>
 
                         <!-- step list -->
-                        <div class="step-list" ref="stepList" v-loading="isRunning" element-loading-text="Running...">  
+                        <div class="step-list" ref="stepList">  
                             <div v-if="steps.length === 0" class="step-empty">
                                 Type a command below, or press <b>/</b> to choose an action
                             </div>
                             <div v-for="(s, i) in steps" :key="i" class="step-row"
-                                :class="{ 'step-selected': selectedStepIndex === i, 'step-running': s._status === 'running',
-                                    'step-ok': s._status === 'ok', 'step-fail': s._status === 'fail' }"
+                                :class="{ 'step-selected': selectedStepIndex === i }"
                                 @click="selectStep(i)">
-                                <span class="step-icon">{{ stepIcon(s._status) }}</span>
+                                <span class="step-icon" :class="stepIcon(s._status).cls">{{ stepIcon(s._status).icon }}</span>
                                 <span class="step-num">{{ i + 1 }}.</span>
                                 <code class="step-code">{{ s.code }}</code>
                                 <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
