@@ -1,4 +1,0 @@
-name: 
-platform: android
-steps:
-  - launchapp: com.atomform.threedprinter.tech

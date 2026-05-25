@@ -2,12 +2,13 @@ import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './util
 import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, runTask, listPackages } from './api.js';
 
 const SLASH_STEP = [
-  { action: 'tap', desc: 'Click on a UI element by text or coordinates' },
-  { action: 'drag', desc: 'Swipe/drag gesture on screen' },
-  { action: 'type', desc: 'Type text input' },
-  { action: 'key', desc: 'Press a system key (back, home, etc.)' },
-  { action: 'launchapp', desc: 'Launch an application by package name' },
-  { action: 'wait', desc: 'Wait for seconds or a condition (e.g. 3|text)' },
+  { action: 'tap', desc: 'Click element by text (uiautomator2)' },
+  { action: 'drag', desc: 'Drag gesture - generates swipe()' },
+  { action: 'type', desc: 'Type text - generates send_keys()' },
+  { action: 'key', desc: 'Press system key - generates press()' },
+  { action: 'launchapp', desc: 'Launch app - generates start_app()' },
+  { action: 'wait', desc: 'Wait seconds - generates time.sleep()' },
+  { action: 'code', desc: 'Custom Python code line' },
 ];
 
 
@@ -50,9 +51,6 @@ new Vue({
       yamlFiles: [],
       currentYamlFile: '',
       currentYamlContent: '',
-      runResults: [],
-      runSummary: '',
-      runAllOk: false,
 
       taskName: '',
       taskDesc: '',
@@ -500,34 +498,44 @@ new Vue({
         this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
       }
     },
-    parseYamlToTask(yamlStr) {
-      const lines = yamlStr.split('\n');
-      let name = '', desc = '', platform = 'android';
+    parseYamlToTask(content) {
+      const lines = content.split('\n');
+      let name = '', desc = '', platform = 'android', inStep = false, stepBuf = [];
       const steps = [];
-      let inSteps = false;
+      const extraLines = [];
+      let inExtra = true;
       for (const line of lines) {
-        const mName = line.match(/^name:\s*(.*)/);
-        if (mName) { name = mName[1].trim(); continue; }
-        const mDesc = line.match(/^description:\s*(.*)/);
-        if (mDesc) { desc = mDesc[1].trim(); continue; }
-        const mPlat = line.match(/^platform:\s*(.*)/);
-        if (mPlat) { platform = mPlat[1].trim(); continue; }
-        if (/^steps:/.test(line)) { inSteps = true; continue; }
-        if (inSteps) {
-          const m = line.match(/^\s+-\s+(\w+):\s*(.*)/);
-          if (m) steps.push({ action: m[1], value: m[2].trim(), _status: 'pending', _detail: '', _duration: null });
+        if (line.startsWith('# name:')) { name = line.split(':')[1].trim(); continue; }
+        if (line.startsWith('# desc:')) { desc = line.split(':')[1].trim(); continue; }
+        if (line.startsWith('# platform:')) { platform = line.split(':')[1].trim(); continue; }
+        if (line.trim() === '# --step--') {
+          if (inStep && stepBuf.length) { steps.push({ code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null }); stepBuf = []; }
+          inStep = true; inExtra = false;
+          continue;
+        }
+        if (inStep) {
+          const t = line.trim();
+          if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
+            stepBuf.push(line);
+          }
+        } else if (inExtra && line.trim()) {
+          if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:')) {
+            extraLines.push(line);
+          }
         }
       }
-      this.taskName = name;
-      this.taskDesc = desc;
-      this.taskPlatform = platform;
-      this.steps = steps;
+      if (inStep && stepBuf.length) { steps.push({ code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null }); }
+      this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform;
+      this.steps = steps; this._extraLines = extraLines;
     },
     taskToYaml() {
-      let y = `name: ${this.taskName || 'Untitled'}\n`;
-      if (this.taskDesc) y += `description: ${this.taskDesc}\n`;
-      y += `platform: ${this.taskPlatform}\nsteps:\n`;
-      for (const s of this.steps) y += `  - ${s.action}: ${s.value}\n`;
+      let y = `# name: ${this.taskName || 'Untitled'}\n`;
+      if (this.taskDesc) y += `# desc: ${this.taskDesc}\n`;
+      y += `# platform: ${this.taskPlatform}\n`;
+      y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
+      y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
+      if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
+      this.steps.forEach(s => { y += '\n# --step--\n' + s.code + '\n'; });
       return y;
     },
     clearTask() {
@@ -540,14 +548,26 @@ new Vue({
       this.selectedStepIndex = -1;
     },
     addStep(action, value) {
-      this.steps.push({ action, value, _status: 'pending', _detail: '', _duration: null });
+      const code = this.stepToCode(action, value);
+      this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.saveCurrentTask();
+    },
+    stepToCode(action, value) {
+      const m = {
+        tap: `device.driver(text="${value}").click()`,
+        drag: `device.driver.swipe(300, 300, 300, 700)`,
+        type: `device.driver.send_keys("${value}")`,
+        key: `device.driver.press("${value}")`,
+        launchapp: `start_app("${value}")`,
+        wait: `time.sleep(${value})`,
+      };
+      return m[action] || value;
     },
     stepAction(type, i) {
       if (type === 'run') this.runSingleStep(i);
       else if (type === 'up' && i > 0) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i - 1, 0, s); this.selectedStepIndex = i - 1; this.saveCurrentTask(); }
       else if (type === 'down' && i < this.steps.length - 1) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectedStepIndex = i + 1; this.saveCurrentTask(); }
-      else if (type === 'edit') { this.cliPrefix = this.steps[i].action; this.cliText = this.steps[i].value; this.selectedStepIndex = i; this.$nextTick(() => this.$refs.cliInput.focus()); }
+      else if (type === 'edit') { this.cliText = this.steps[i].code; this.cliPrefix = ''; this.selectedStepIndex = i; this.$nextTick(() => this.$refs.cliInput.focus()); }
       else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.saveCurrentTask(); }
     },
     selectStep(i) { this.selectedStepIndex = i; },
@@ -601,11 +621,13 @@ new Vue({
               this.steps[i]._duration = msg.duration;
               this.$set(this.steps, i, { ...this.steps[i] });
               const color = { ok: 'ok', fail: 'fail', running: 'info', skipped: 'warn' }[msg.status] || 'info';
-              this.addLog(color, `[${msg.action}] ${msg.value} → ${msg.status}${msg.duration ? ` (${msg.duration}s)` : ''}`);
+              this.addLog(color, `Step ${msg.index} → ${msg.status}`);
             }
             if (msg.status === 'ok' || msg.status === 'fail') {
               this.scheduleDump();
             }
+          } else if (msg.type === 'log') {
+            this.addLog('info', msg.text);
           } else if (msg.type === 'done') {
             this.addLog(msg.fail ? 'fail' : 'ok', `${msg.ok}/${msg.total} steps passed`);
             this.scheduleDump();
@@ -630,9 +652,10 @@ new Vue({
       }, 1000);
     },
     taskToYamlSingle(i) {
-      let y = `name: ${this.taskName}\nplatform: ${this.taskPlatform}\nsteps:\n`;
-      const s = this.steps[i];
-      y += `  - ${s.action}: ${s.value}\n`;
+      let y = `# name: ${this.taskName}\n# platform: ${this.taskPlatform}\n`;
+      y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
+      y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
+      y += '# --step--\n' + this.steps[i].code + '\n';
       return y;
     },
     async runAllSteps() {
@@ -691,7 +714,7 @@ new Vue({
       this.settingsVisible = false;
       if (!this.currentYamlFile) {
         const safe = (this.taskName || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
-        this.currentYamlFile = safe + '.yaml';
+        this.currentYamlFile = safe + '.py';
       }
       this.saveCurrentTask();
       this.refreshYamlFiles();
@@ -736,21 +759,19 @@ new Vue({
       const m2 = line.match(/^(\w+):\s*(.*)/);
       if (!m2) return;
       const action = m2[1], value = m2[2] || '';
-      let idx = this.selectedStepIndex;
-      if (idx >= 0 && idx < this.steps.length) {
-        this.steps[idx].action = action;
-        this.steps[idx].value = value;
-        this.steps[idx]._status = 'pending';
+      const code = this.stepToCode(action, value);
+      if (this.selectedStepIndex >= 0 && this.selectedStepIndex < this.steps.length) {
+        this.steps[this.selectedStepIndex].code = code;
+        this.steps[this.selectedStepIndex]._status = 'pending';
         this.saveCurrentTask();
       } else {
-        idx = this.steps.length;
-        this.addStep(action, value);
+        this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+        this.saveCurrentTask();
       }
       this.cliText = '';
       this.cliPrefix = '';
       this.selectedStepIndex = -1;
       this.slashVisible = false;
-      if (this.autoRun) this.runSingleStep(idx);
     },
     pickSlash(item) {
       if (item.isApp) {

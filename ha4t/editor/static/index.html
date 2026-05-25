@@ -190,8 +190,7 @@
                                 @click="selectStep(i)">
                                 <span class="step-icon">{{ stepIcon(s._status) }}</span>
                                 <span class="step-num">{{ i + 1 }}.</span>
-                                <span class="step-act">{{ s.action }}</span>
-                                <span class="step-val">{{ s.value }}</span>
+                                <code class="step-code">{{ s.code }}</code>
                                 <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
                                 <div class="step-btns">
                                     <button class="sb" @click.stop="stepAction('run', i)" title="Run">&#9654;</button>
