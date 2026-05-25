@@ -124,6 +124,11 @@
                     </template>
                   </el-table-column>
                 </el-table>
+                <div class="insert-step-bar" v-if="selectedNode">
+                  <el-button size="small" type="primary" @click="insertStepFromElement" icon="el-icon-plus">
+                    Insert Step
+                  </el-button>
+                </div>
             </div>
             <div
               class="divider" 

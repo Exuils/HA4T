@@ -116,6 +116,7 @@ new Vue({
     const canvas = this.$el.querySelector('#hierarchyCanvas');
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('click', this.onMouseClick);
+    canvas.addEventListener('dblclick', this.onMouseDblClick);
     canvas.addEventListener('mouseleave', this.onMouseLeave);
 
     this.setupCanvasResolution('#screenshotCanvas');
@@ -813,6 +814,35 @@ new Vue({
     addLog(level, text) {
       this.logLines.push({ level, text: `${new Date().toLocaleTimeString()} ${text}` });
       if (!this.logOpen) this.logOpen = true;
+    },
+
+    onMouseDblClick() {
+      if (this.selectedNode && this.rightTab === 'editor') {
+        this.insertStepFromElement();
+      }
+    },
+    generateU2Selector(node) {
+      if (node.resourceId) return `resourceId="${node.resourceId}"`;
+      if (node.text) return `text="${node.text}"`;
+      if (node.description) return `description="${node.description}"`;
+      if (node._type) return `className="${node._type}"`;
+      return null;
+    },
+    insertStepFromElement() {
+      if (!this.selectedNode) return;
+      if (this.rightTab !== 'editor') {
+        this.$message({ message: 'Switch to Editor tab to insert steps', type: 'info' });
+        return;
+      }
+      const sel = this.generateU2Selector(this.selectedNode);
+      if (!sel) {
+        this.$message({ message: 'No usable selector found for this element', type: 'warning' });
+        return;
+      }
+      const code = `device.driver(${sel}).click()`;
+      this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+      this.saveCurrentTask();
+      this.$message({ message: `Inserted: ${code}`, type: 'success' });
     }
   }
 });

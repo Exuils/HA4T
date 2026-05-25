@@ -154,6 +154,11 @@ body, html {
     margin-left: 5px;
 }
 
+.insert-step-bar {
+    padding: 8px 12px;
+    border-top: 1px solid #333844;
+}  
+
 code {
     background-color: #2D3740;
     padding: 3px 5px;
