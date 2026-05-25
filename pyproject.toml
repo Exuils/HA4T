@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "HA4T"
+version = "0.0.7"
+description = "跨平台的UI自动化框架，适用于混合型app"
+readme = "README.md"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "caishilong", email = "caishilong@exuils.com"},
+]
+keywords = ["automation", "automated-test", "game", "android", "ios", "hybrid-app"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "colorlog",
+    "pillow",
+    "requests",
+    "uiautomator2",
+    "websockets",
+    "numpy",
+    "paddleocr",
+    "setuptools",
+    "six",
+    "wheel",
+    "tornado",
+    "logzero",
+    "logging-reset",
+    "adbutils",
+    "facebook-wda",
+    "paddlepaddle",
+    "tidevice",
+    "deepdiff",
+    "opencv-python",
+    "matplotlib",
+    "pytest",
+    "psutil",
+    "mock",
+    "allure-pytest",
+    "pywin32; sys_platform == 'win32'",
+    "fastapi",
+    "uvicorn",
+    "aiofiles",
+    "hmdriver2",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8",
+    "black",
+    "isort",
+    "twine",
+    "pytest",
+    "wheel",
+]
+
+[tool.uv]
+default-index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.setuptools.packages.find]
+exclude = ["tests"]
+
+[tool.setuptools.package-data]
+ha4t = ["binaries/*"]
+"ha4t.editor" = ["static/**/*"]

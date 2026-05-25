@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI Viewer</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" type="text/css" href="/static/cdn/unpkg.com/element-theme-dark@1.0.2/lib/index.css">
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=1.0">
+
+</head>
+<body>
+    <div
+        id="app"
+        v-loading="isConnecting || isDumping"
+        element-loading-spinner="el-icon-loading"
+        element-loading-background="rgba(0, 0, 0, 0.7)">
+
+        <div class="header">
+            <div style="margin-right: 20px;">
+                <span style="font-weight: bold; font-size: 20px;">UI Viewer</span>
+                <span>{{version}}</span>
+            </div>
+            <el-select
+              v-model="platform"
+              placeholder="Select Platform"
+              style="margin-right: 10px; width: 140px"
+              @change="initPlatform">
+              <el-option label="HarmonyOS" value="harmony"></el-option>
+              <el-option label="Android" value="android"></el-option>
+              <el-option label="iOS" value="ios"></el-option>
+            </el-select>
+  
+            <el-select
+              v-model="serial"
+              placeholder="Select Device"
+              style="margin-right: 20px; width: 250px"
+              @visible-change="listDevice">
+              <el-option
+                v-for="d in devices"
+                :key="d"
+                :label="d"
+                :value="d">
+              </el-option>
+            </el-select>
+
+            <el-tooltip v-if="platform === 'ios'" content="Set WDA url, such as http://localhost:8100" placement="top">
+              <el-input
+                class="custom-input"
+                v-model="wdaUrl"
+                style="width: 180px; margin-right: 20px;"
+                placeholder="WDA server url">
+              </el-input>
+            </el-tooltip>
+
+            <el-tooltip v-if="platform === 'ios'" content="Set the maximum depth for iOS dump hierarchy, default value is 30" placement="top">
+              <el-input
+                class="custom-input"
+                v-model="snapshotMaxDepth"
+                style="width: 110px; margin-right: 20px;"
+                placeholder="maxDepth">
+              </el-input>
+            </el-tooltip>
+
+
+            <el-button 
+              :disabled="isConnecting"
+              style="margin-right: 10px; width: 100px;"
+              v-on:click="connectDevice">
+              <span v-if="isConnecting" class="el-icon-loading"></span>
+              <span v-else>{{ isConnected ? 'Connected' : 'Connect' }}</span>
+            </el-button>
+
+            <el-tooltip
+              v-if="!isConnected"
+              content="Please connect device first"
+              placement="top">
+              <el-button 
+                :disabled="!isConnected || isDumping"
+                style="margin-right: 10px; width: 160px;">
+                <span>Dump Hierarchy</span>
+              </el-button>
+            </el-tooltip>
+
+            <el-button 
+              v-else :disabled="isDumping"
+              style="margin-right: 10px; width: 160px;"
+              v-on:click="screenshotAndDumpHierarchy">
+              <span 
+                v-if="isDumping"
+                class="el-icon-loading">
+              </span>
+              <span>Dump Hierarchy</span>
+            </el-button>
+    
+            <div style="flex: 1;"></div> <!-- 占据剩余空间 -->
+            <el-link
+              class="custom-link"
+              href="https://github.com/codematrixer/ui-viewer"
+              target="_blank"
+              :underline="false">GitHub
+            </el-link>
+
+        </div>
+        <div class="main">
+            <div class="left">
+                <canvas id="screenshotCanvas"></canvas>
+                <canvas id="hierarchyCanvas"></canvas>
+            </div>
+            <div class="center" :style="{ width: centerWidth + 'px' }">
+                <p class="region-title">Selected Element Info</p>
+                <el-table
+                  :data="selectedNodeDetails"
+                  style="width: 100%"
+                  class="custom-table">
+                  <el-table-column prop="key" label="Key" width="30%"></el-table-column>
+                  <el-table-column label="Value" width="70%">
+                    <template slot-scope="scope">
+                      <code style="padding: 0 5px;">{{ scope.row.value }}</code>
+                      <el-button
+                        class="el-button attr-button"
+                        @click="copyToClipboard(scope.row.value)">复制
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+            </div>
+            <div
+              class="divider" 
+              @mousedown="startDrag" 
+              @mouseenter="hoverDivider" 
+              @mouseleave="leaveDivider"
+              :class="{ 'divider-hover': isDividerHovered, 'divider-dragging': isDragging }">
+            </div>
+
+            <div class="right">
+                <el-tabs v-model="rightTab" class="right-tabs">
+                    <el-tab-pane label="Hierarchy" name="hierarchy">
+                        <el-input
+                          class="custom-input"
+                          placeholder="Search for ..."
+                          style="margin-left: 10px; margin-bottom: 6px;"
+                          v-model="nodeFilterText">
+                        </el-input>
+                        <el-tree
+                            class="custom-tree"
+                            ref="treeRef"
+                            :data="treeData"
+                            :props="defaultTreeProps"
+                            @node-click="handleTreeNodeClick"
+                            node-key="_id"
+                            default-expand-all
+                            :expand-on-click-node="false"
+                            :filter-node-method="filterNode">
+                        </el-tree>
+                    </el-tab-pane>
+                    <el-tab-pane label="Editor" name="editor">
+                        <!-- toolbar -->
+                        <div class="editor-toolbar">
+                            <el-select v-model="currentYamlFile" placeholder="Select test case" size="small"
+                                style="flex: 1;" @change="loadYamlFile" clearable>
+                                <el-option v-for="f in yamlFiles" :key="f.filename" :label="f.name" :value="f.filename">
+                                    <span>{{ f.name }}</span>
+                                    <span style="float: right; color: #8492a6; font-size: 11px;">{{ f.step_count }} steps | {{ f.platform }}</span>
+                                </el-option>
+                            </el-select>
+                            <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
+                            <el-button size="small" @click="newYamlFile">New</el-button>
+                            <el-button size="small" type="primary" @click="saveYamlFile" :disabled="!currentYamlFile">Save</el-button>
+                            <el-button size="small" @click="settingsVisible = true">Settings</el-button>
+                            <el-switch v-model="autoRun" active-text="Auto Run" inactive-text="Manual"
+                                size="small" style="margin-left: 4px;"></el-switch>
+                        </div>
+
+                        <!-- meta info bar -->
+                        <div class="editor-meta">
+                            <span class="meta-item">Platform: <b>{{ taskPlatform }}</b></span>
+                            <span class="meta-item" v-if="taskName">Name: <b>{{ taskName }}</b></span>
+                            <span class="meta-item">Steps: <b>{{ steps.length }}</b></span>
+                        </div>
+
+                        <!-- step list -->
+                        <div class="step-list" ref="stepList" v-loading="isRunning" element-loading-text="Running...">  
+                            <div v-if="steps.length === 0" class="step-empty">
+                                Type a command below, or press <b>/</b> to choose an action
+                            </div>
+                            <div v-for="(s, i) in steps" :key="i" class="step-row"
+                                :class="{ 'step-selected': selectedStepIndex === i, 'step-running': s._status === 'running',
+                                    'step-ok': s._status === 'ok', 'step-fail': s._status === 'fail' }"
+                                @click="selectStep(i)">
+                                <span class="step-icon">{{ stepIcon(s._status) }}</span>
+                                <span class="step-num">{{ i + 1 }}.</span>
+                                <span class="step-act">{{ s.action }}</span>
+                                <span class="step-val">{{ s.value }}</span>
+                                <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
+                                <div class="step-btns">
+                                    <button class="sb" @click.stop="stepAction('run', i)" title="Run">&#9654;</button>
+                                    <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="Up">&#8593;</button>
+                                    <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="Down">&#8595;</button>
+                                    <button class="sb" @click.stop="stepAction('edit', i)" title="Edit">E</button>
+                                    <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="Delete">X</button>
+                                </div>
+                                <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
+                            </div>
+                        </div>
+
+                        <!-- cli input -->
+                        <div class="cli-wrap">
+                            <span class="cli-prefix" v-if="cliPrefix">{{ cliPrefix }}:</span>
+                            <span class="cli-prompt">&gt;</span>
+                            <input class="cli-input" ref="cliInput" v-model="cliText"
+                                @keydown="onCliKeydown" @input="onCliInput"
+                                :placeholder="cliPlaceholder"
+                                spellcheck="false" autocomplete="off" />
+                            <!-- slash palette -->
+                            <div class="slash-palette" v-if="slashVisible">
+                                <div v-for="(item, idx) in slashItems" :key="idx"
+                                    class="slash-item" :class="{ 'slash-hl': idx === slashIdx }"
+                                    @mousedown.prevent="pickSlash(item)">
+                                    <span class="slash-key" v-if="!item.isApp">{{ item.key || item.action }}</span>
+                                    <span class="slash-key slash-app" v-else>{{ item.key }}</span>
+                                    <span class="slash-desc" v-if="!item.isApp">{{ item.desc }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- log panel (collapsible) -->
+                        <div class="log-panel" :class="{ 'log-open': logOpen }">
+                            <div class="log-header" @click="logOpen = !logOpen">
+                                Log {{ logLines.length ? '(' + logLines.length + ')' : '' }}
+                                <span class="log-arrow">{{ logOpen ? '&#9660;' : '&#9650;' }}</span>
+                            </div>
+                            <div class="log-body" v-if="logOpen">
+                                <div class="log-line" v-for="(l, i) in logLines" :key="i"
+                                    :class="'log-' + l.level">{{ l.text }}</div>
+                            </div>
+                        </div>
+                    </el-tab-pane>
+
+                    <!-- Settings Modal -->
+                    <el-dialog title="Task Settings" :visible.sync="settingsVisible" width="420px" top="15vh">
+                        <el-form label-width="100px" size="small">
+                            <el-form-item label="Task Name">
+                                <el-input v-model="taskName"></el-input>
+                            </el-form-item>
+                            <el-form-item label="Description">
+                                <el-input v-model="taskDesc" type="textarea" :rows="2"></el-input>
+                            </el-form-item>
+                            <el-form-item label="Platform">
+                                <el-select v-model="taskPlatform" style="width: 100%;">
+                                    <el-option label="Android" value="android"></el-option>
+                                    <el-option label="iOS" value="ios"></el-option>
+                                    <el-option label="HarmonyOS" value="harmony"></el-option>
+                                </el-select>
+                            </el-form-item>
+                        </el-form>
+                        <span slot="footer">
+                            <el-button @click="settingsVisible = false" size="small">Cancel</el-button>
+                            <el-button type="primary" @click="applySettings" size="small">OK</el-button>
+                        </span>
+                    </el-dialog>
+                </el-tabs>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/cdn/code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/static/cdn/cdn.jsdelivr.net/npm/vue@2"></script>
+    <script src="/static/cdn/unpkg.com/element-ui/lib/index.js"></script>
+    <script type="module" src="/static/js/index.js"></script> 
+</body>
+</html>

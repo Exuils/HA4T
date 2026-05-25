@@ -20,12 +20,19 @@ import numpy as np
 from ha4t import screen_size, device
 from ha4t.aircv.cv import match_loop, Template
 from ha4t.config import Config as _CF
-from ha4t.orc import OCR
 from ha4t.utils.files_operat import get_file_list as _get_file_list
 from ha4t.utils.log_utils import log_out, cost_time
 
-logreset.reset_logging()  # paddleocr 会污染 logging
-ocr = OCR()
+_ocr = None
+
+
+def _get_ocr():
+    global _ocr
+    if _ocr is None:
+        logreset.reset_logging()  # paddleocr 会污染 logging
+        from ha4t.orc import OCR
+        _ocr = OCR()
+    return _ocr
 
 
 @cost_time
@@ -62,7 +69,7 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
             elif isinstance(args[0][0], str):
                 raise NotImplementedError("webview点击暂不支持")
         elif isinstance(args[0], str):
-            pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0)
+            pos = _get_ocr().get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0)
             perform_click(*pos, duration)
             perform_click(*pos, duration)
         elif isinstance(args[0], Template):
@@ -107,7 +114,7 @@ def _exists(*args, **kwargs) -> bool:
                 raise NotImplementedError("webview点击暂不支持")
         elif isinstance(args[0], str):
             try:
-                pos = ocr.get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0,
+                pos = _get_ocr().get_text_pos(args[0], device.driver.screenshot, index=args[1] if len(args) > 1 else 0,
                                        timeout=1)
                 return True
             except:
@@ -239,7 +246,7 @@ def get_page_text() -> str:
     
     :return: 页面上的所有文字拼接成的字符串
     """
-    return ocr.get_page_text(device.driver.screenshot)
+    return _get_ocr().get_page_text(device.driver.screenshot)
 
 
 @cost_time
