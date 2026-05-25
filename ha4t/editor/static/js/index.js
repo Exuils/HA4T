@@ -555,8 +555,8 @@ new Vue({
     },
     stepToCode(action, value) {
       const m = {
-        tap: `device.driver(text="${value}").click()`,
-        drag: `device.driver.swipe(300, 300, 300, 700)`,
+        tap: `click(text="${value}")`,
+        drag: `swipe((300, 300), (300, 700))`,
         type: `device.driver.send_keys("${value}")`,
         key: `device.driver.press("${value}")`,
         launchapp: `start_app("${value}")`,
@@ -822,10 +822,10 @@ new Vue({
       }
     },
     generateU2Selector(node) {
-      if (node.resourceId) return `resourceId="${node.resourceId}"`;
-      if (node.text) return `text="${node.text}"`;
-      if (node.description) return `description="${node.description}"`;
-      if (node._type) return `className="${node._type}"`;
+      if (node.resourceId) return { key: 'resourceId', value: node.resourceId };
+      if (node.text) return { key: 'text', value: node.text };
+      if (node.description) return { key: 'description', value: node.description };
+      if (node._type) return { key: 'className', value: node._type };
       return null;
     },
     insertStepFromElement() {
@@ -839,7 +839,7 @@ new Vue({
         this.$message({ message: 'No usable selector found for this element', type: 'warning' });
         return;
       }
-      const code = `device.driver(${sel}).click()`;
+      const code = `click(${sel.key}="${sel.value}")`;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.saveCurrentTask();
       this.$message({ message: `Inserted: ${code}`, type: 'success' });

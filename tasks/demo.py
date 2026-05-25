@@ -13,4 +13,4 @@ connect(platform="android")
 start_app("com.oceanwing.eufymake.cn", activity="com.oceanwing.FDMPrint.main.StartActivity")
 
 # --step--
-device.driver(text="打印照片").click()
+click(text="打印照片")
