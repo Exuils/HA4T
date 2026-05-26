@@ -725,6 +725,9 @@ new Vue({
       this.taskPlatform = 'android';
       this.settingsVisible = true;
     },
+    async openTasksFolder() {
+      await fetch(`${API_HOST}tasks/open-folder`, { method: 'POST' });
+    },
     applySettings() {
       this.settingsVisible = false;
       if (!this.currentYamlFile) {

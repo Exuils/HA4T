@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import json
 import os
@@ -20,6 +20,7 @@ from ha4t.editor._device import (
 )
 from ha4t.editor._version import __version__
 from ha4t.editor._models import (
+
     ApiResponse, XPathLiteRequest,
     TaskFile, TaskSaveRequest, TaskRunRequest, TaskStepResult, TaskRunResponse
 )
@@ -30,9 +31,26 @@ router = APIRouter()
 
 TASKS_DIR = Path(os.environ.get(
     "HA4T_TASKS_DIR",
-    Path(__file__).parent.parent.parent.parent / "tasks"
+    Path.home() / "Documents" / "HA4T" / "tasks" if os.name == "nt"
+    else Path.home() / "ha4t" / "tasks"
 ))
 TASKS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/tasks/open-folder", response_model=ApiResponse)
+def open_tasks_folder():
+    import subprocess, sys
+    try:
+        path = str(TASKS_DIR)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return ApiResponse.doSuccess(path)
+    except Exception as e:
+        return ApiResponse.doError(str(e))
 
 _STEP_MARKER = "# --step--"
 
@@ -185,7 +203,7 @@ def list_tasks():
             description=meta.get('desc', ''),
             platform=meta.get('platform', 'android'),
             step_count=len(steps),
-        ).model_dump())
+        ).model_dump()())
     return ApiResponse.doSuccess(files)
 
 

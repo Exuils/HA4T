@@ -119,6 +119,7 @@
                             </el-select>
                             <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
                             <el-button size="small" @click="newYamlFile">新建</el-button>
+                            <el-button size="small" @click="openTasksFolder" icon="el-icon-folder-opened">文件夹</el-button>
                             <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">全部运行</el-button>
                             <el-button size="small" @click="settingsVisible = true">设置</el-button>
                             <el-switch v-model="autoRun" active-text="自动运行" inactive-text="手动"
