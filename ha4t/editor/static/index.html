@@ -6,13 +6,11 @@
     <title>UI Viewer</title>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" type="text/css" href="/static/cdn/unpkg.com/element-theme-dark@1.0.2/lib/index.css">
-    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=1.0">
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=2">
 
 </head>
 <body>
     <div id="app">
-        <div class="header">
-
         <div class="header">
             <div style="margin-right: 20px;">
                 <span style="font-weight: bold; font-size: 20px;">UI Viewer</span>
@@ -108,7 +106,12 @@
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
             <div class="center" :style="{ width: centerWidth + 'px' }">
-                <p class="region-title">Selected Element Info</p>
+                <div class="center-header">
+                    <p class="region-title">Selected Element Info</p>
+                    <el-button v-if="selectedNode" size="small" type="primary" @click="insertStepFromElement" icon="el-icon-plus">
+                        Insert Step
+                    </el-button>
+                </div>
                 <el-table
                   :data="selectedNodeDetails"
                   style="width: 100%"
@@ -124,11 +127,6 @@
                     </template>
                   </el-table-column>
                 </el-table>
-                <div class="insert-step-bar" v-if="selectedNode">
-                  <el-button size="small" type="primary" @click="insertStepFromElement" icon="el-icon-plus">
-                    Insert Step
-                  </el-button>
-                </div>
             </div>
             <div
               class="divider" 
@@ -172,6 +170,7 @@
                             <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
                             <el-button size="small" @click="newYamlFile">New</el-button>
                             <el-button size="small" type="primary" @click="saveYamlFile" :disabled="!currentYamlFile">Save</el-button>
+                            <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">Run All</el-button>
                             <el-button size="small" @click="settingsVisible = true">Settings</el-button>
                             <el-switch v-model="autoRun" active-text="Auto Run" inactive-text="Manual"
                                 size="small" style="margin-left: 4px;"></el-switch>
@@ -192,7 +191,9 @@
                             <div v-for="(s, i) in steps" :key="i" class="step-row"
                                 :class="{ 'step-selected': selectedStepIndex === i }"
                                 @click="selectStep(i)">
-                                <span class="step-icon" :class="stepIcon(s._status).cls">{{ stepIcon(s._status).icon }}</span>
+                                <span class="step-icon" :class="stepIcon(s._status).cls">
+                                    {{ stepIcon(s._status).icon }}
+                                </span>
                                 <span class="step-num">{{ i + 1 }}.</span>
                                 <code class="step-code">{{ s.code }}</code>
                                 <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
@@ -270,6 +271,6 @@
     <script src="/static/cdn/code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/static/cdn/cdn.jsdelivr.net/npm/vue@2"></script>
     <script src="/static/cdn/unpkg.com/element-ui/lib/index.js"></script>
-    <script type="module" src="/static/js/index.js"></script> 
+    <script type="module" src="/static/js/index.js?v=2"></script> 
 </body>
 </html>

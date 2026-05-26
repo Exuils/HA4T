@@ -47,7 +47,7 @@ new Vue({
       isDividerHovered: false,
       isDragging: false,
 
-      rightTab: 'hierarchy',
+      rightTab: 'editor',
       yamlFiles: [],
       currentYamlFile: '',
       currentYamlContent: '',
@@ -56,7 +56,7 @@ new Vue({
       taskDesc: '',
       taskPlatform: 'android',
       steps: [],
-      autoRun: false,
+      autoRun: getFromLocalStorage('autoRun', false),
       selectedStepIndex: -1,
       cliText: '',
       cliPrefix: '',
@@ -102,6 +102,9 @@ new Vue({
       },
       nodeFilterText(val) {
         this.$refs.treeRef.filter(val);
+      },
+      autoRun(val) {
+        saveToLocalStorage('autoRun', val);
       },
       cliText() {
         this.onCliInput();
@@ -573,9 +576,9 @@ new Vue({
     },
     selectStep(i) { this.selectedStepIndex = i; },
     stepIcon(status) {
+      status = status || 'pending';
       const m = { pending: '○', running: '◐', ok: '●', fail: '✖' };
-      const cls = status ? 'icon-' + status : '';
-      return { icon: m[status] || '○', cls: cls };
+      return { icon: m[status] || '○', cls: 'icon-' + status };
     },
     async runSingleStep(i) {
       if (!this.isConnected) { this.$message({ message: 'Not connected', type: 'warning' }); return; }
@@ -583,11 +586,7 @@ new Vue({
       s._status = 'running';
       this.$set(this.steps, i, { ...s });
       this.isRunning = true;
-      try {
-        await this.wsRun(this.taskToYamlSingle(i));
-      } finally {
-        this.isRunning = false;
-      }
+      await this.wsRun(this.taskToYamlSingle(i), i);
     },
     async runAllSteps() {
       this.steps.forEach((s, i) => { s._status = 'pending'; s._detail = ''; s._duration = null; this.$set(this.steps, i, { ...s }); });
@@ -595,13 +594,9 @@ new Vue({
       this.logLines = [];
       this.addLog('info', 'Running all steps...');
       this.isRunning = true;
-      try {
-        await this.wsRun(this.currentYamlContent);
-      } finally {
-        this.isRunning = false;
-      }
+      await this.wsRun(this.currentYamlContent);
     },
-    wsRun(yaml) {
+    wsRun(yaml, stepOffset) {
       return new Promise((resolve, reject) => {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const ws = new WebSocket(`${proto}//${location.host}/ws/run`);
@@ -610,13 +605,14 @@ new Vue({
             platform: this.taskPlatform,
             serial: this.serial,
             filename: this.currentYamlFile || undefined,
-            content: yaml
+            content: yaml,
+            step_offset: stepOffset || 0
           }));
         };
         ws.onmessage = (e) => {
           const msg = JSON.parse(e.data);
           if (msg.type === 'step') {
-            const i = msg.index - 1;
+            const i = (msg.index || 1) - 1;
             if (this.steps[i]) {
               this.steps[i]._status = msg.status;
               this.steps[i]._detail = msg.detail || '';
@@ -649,8 +645,9 @@ new Vue({
     },
     scheduleDump() {
       if (this._dumpTimer) clearTimeout(this._dumpTimer);
-      this._dumpTimer = setTimeout(() => {
-        if (this.isConnected) this.screenshotAndDumpHierarchy();
+      this._dumpTimer = setTimeout(async () => {
+        if (this.isConnected) await this.screenshotAndDumpHierarchy();
+        this.isRunning = false;
       }, 1000);
     },
     taskToYamlSingle(i) {
@@ -826,11 +823,13 @@ new Vue({
       }
     },
     generateU2Selector(node) {
+      const esc = (s) => (s || '').replace(/"/g, '\\"');
       const attrs = [];
-      if (node.resourceId) attrs.push(`resourceId="${node.resourceId}"`);
-      if (node.text) attrs.push(`text="${node.text}"`);
-      if (node.description) attrs.push(`description="${node.description}"`);
-      if (node._type) attrs.push(`className="${node._type}"`);
+      if (node.xpath) attrs.push(`xpath="${esc(node.xpath)}"`);
+      if (node.resourceId) attrs.push(`resourceId="${esc(node.resourceId)}"`);
+      if (node.text) attrs.push(`text="${esc(node.text)}"`);
+      if (node.description) attrs.push(`description="${esc(node.description)}"`);
+      if (node._type) attrs.push(`className="${esc(node._type)}"`);
       if (node.index !== undefined && node.index !== null && node.index >= 0) attrs.push(`index=${node.index}`);
       if (attrs.length === 0) return null;
       return attrs.join(', ');

@@ -87,10 +87,14 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
                          threshold=kwargs.get("threshold", 0.8))
         perform_click(*pos, duration)
     else:
+        timeout = kwargs.pop("timeout", 3)
+        xpath = kwargs.pop("xpath", None)
         if _CF.PLATFORM == "ios":
             device.driver(**kwargs).tap_hold(duration=duration)
+        elif xpath:
+            device.driver.xpath(xpath).click(timeout=timeout)
         else:
-            device.driver(**kwargs).long_click(duration=duration)
+            device.driver(**kwargs).click(timeout=timeout)
 
 
 def _exists(*args, **kwargs) -> bool:

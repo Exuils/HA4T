@@ -31,7 +31,10 @@ def list_serials(platform: str) -> List[str]:
         raw = tidevice.Usbmux().device_list()
         devices = [d.udid for d in raw]
     else:
-        devices = hdc.list_devices()
+        try:
+            devices = hdc.list_devices()
+        except Exception:
+            pass
 
     return devices
 

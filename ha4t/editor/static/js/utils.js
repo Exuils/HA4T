@@ -1,10 +1,12 @@
 export function saveToLocalStorage(key, value) {
-    localStorage.setItem(key, value);
-  }
-  
-  export function getFromLocalStorage(key, defaultValue) {
-    return localStorage.getItem(key) || defaultValue;
-  }
+    localStorage.setItem(key, JSON.stringify(value));
+}
+
+export function getFromLocalStorage(key, defaultValue) {
+    const v = localStorage.getItem(key);
+    if (v === null) return defaultValue;
+    try { return JSON.parse(v); } catch (e) { return defaultValue; }
+}
   
   export function copyToClipboard(value) {
     if (typeof value === 'object') {

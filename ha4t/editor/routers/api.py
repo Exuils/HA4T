@@ -205,25 +205,16 @@ async def ws_run_task(ws: WebSocket):
 
     content = req.get("content", "")
     filename = req.get("filename", "untitled.py")
-    if not content and filename:
-        path = TASKS_DIR / filename
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-    if not content:
-        await ws.send_json({"type": "error", "msg": "No task content"})
-        await ws.close()
-        return
+    step_offset = req.get("step_offset", 0)
 
-    step_codes = _parse_py_steps(content)
-    total = len(step_codes)
-    if not total:
-        await ws.send_json({"type": "error", "msg": "No # --step-- markers found"})
-        await ws.close()
-        return
+    content = re.sub(r'\r?\n# --step--\r?\n', '\nprint("# --step--")\n# --step--\n', content)
 
     tmpdir = Path(tempfile.mkdtemp())
     tmppy = tmpdir / (filename or "untitled.py")
     tmppy.write_text(content, encoding="utf-8")
+
+    step_codes = _parse_py_steps(content)
+    total = len(step_codes)
 
     try:
         proc = subprocess.Popen(
@@ -234,21 +225,29 @@ async def ws_run_task(ws: WebSocket):
             text=True,
         )
         step_idx = 0
+        prev = None
+        errors = []
         for line in proc.stdout:
             line = line.strip()
             if not line:
                 continue
             if _STEP_MARKER in line and step_idx < total:
-                await ws.send_json({"type": "step", "index": step_idx + 1, "status": "running"})
+                if prev is not None:
+                    await ws.send_json({"type": "step", "index": prev + step_offset, "status": "ok"})
                 step_idx += 1
+                await ws.send_json({"type": "step", "index": step_idx + step_offset, "status": "running"})
+                prev = step_idx
+            if 'Error' in line or 'Traceback' in line or 'FAIL' in line:
+                errors.append(line)
             await ws.send_json({"type": "log", "text": line})
         proc.wait()
 
-        ok = total if proc.returncode == 0 else 0
-        for i in range(total):
-            status = "ok" if i < ok else "fail"
-            await ws.send_json({"type": "step", "index": i + 1, "status": status})
-        await ws.send_json({"type": "done", "ok": ok, "fail": total - ok, "total": total})
+        all_ok = (proc.returncode == 0 and not errors)
+        if prev:
+            await ws.send_json({"type": "step", "index": prev + step_offset, "status": "ok" if all_ok else "fail"})
+        ok = total if all_ok else 0
+        fail = 0 if all_ok else total
+        await ws.send_json({"type": "done", "ok": ok, "fail": fail, "total": total})
     except Exception as e:
         await ws.send_json({"type": "error", "msg": str(e)})
     finally:

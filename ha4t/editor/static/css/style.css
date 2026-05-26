@@ -66,6 +66,7 @@ body, html {
 }
 .left {
     width: 25%;
+    min-width: 250px;
     background-color: #212933;
     border-right: #333844 1px solid;
     justify-content: center;
@@ -81,12 +82,14 @@ body, html {
 }
 .center {
     width: 30%;
+    min-width: 280px;
+    max-width: 380px;
     background-color: #212933;
 }
 
 .right {
-    /* flex: 1; */
-    width: 45%;
+    flex: 1;
+    min-width: 300px;
     padding-right: 12px;
     background-color: #212933;
 }
@@ -106,7 +109,16 @@ body, html {
 .region-title {
     font-weight: bold;
     margin-left: 15px;
-    margin-bottom: 10px;
+    margin-bottom: 0;
+}
+.center-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0 6px;
+}
+.center-header .el-button {
+    margin-right: 10px;
 }
 
 .custom-table {
@@ -154,10 +166,7 @@ body, html {
     margin-left: 5px;
 }
 
-.insert-step-bar {
-    padding: 8px 12px;
-    border-top: 1px solid #333844;
-}  
+}
 
 code {
     background-color: #2D3740;
@@ -272,7 +281,19 @@ code {
 .step-icon { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; }
 .step-icon.icon-ok { color: #67c23a; }
 .step-icon.icon-fail { color: #f56c6c; }
-.step-icon.icon-running { color: #e6a23c; }
+.step-icon.icon-running {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid #e6a23c;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    font-size: 0;
+    line-height: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .step-num { color: #666; min-width: 22px; flex-shrink: 0; }
 .step-code {
   color: #e0e0e0;
