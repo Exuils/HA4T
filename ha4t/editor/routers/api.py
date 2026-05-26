@@ -201,7 +201,7 @@ def list_tasks():
             description=meta.get('desc', ''),
             platform=meta.get('platform', 'android'),
             step_count=len(steps),
-        ).model_dump()())
+        ).model_dump())
     return ApiResponse.doSuccess(files)
 
 
