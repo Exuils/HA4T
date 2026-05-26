@@ -61,6 +61,9 @@ dev = [
     "wheel",
 ]
 
+[project.scripts]
+ha4t = "ha4t.editor.__main__:run"
+
 [tool.uv]
 default-index = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
