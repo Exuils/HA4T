@@ -27,13 +27,12 @@ jobs:
 
       - name: 安装依赖
         run: |
-          uv pip install --system -r docs/requirements.txt
-          uv pip install --system -e .
+          uv sync
+          uv pip install -r docs/requirements.txt
 
       - name: 构建文档
         run: |
-          cd docs
-          make html
+          uv run sphinx-build -b html docs/ docs/build/html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
