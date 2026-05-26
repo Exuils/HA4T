@@ -19,9 +19,7 @@ from ha4t.editor._device import (
     AndroidDevice, IosDevice, HarmonyDevice
 )
 from ha4t.editor._version import __version__
-from ha4t.editor._models import (
-
-    ApiResponse, XPathLiteRequest,
+from ha4t.editor._models import (    ApiResponse, XPathLiteRequest,
     TaskFile, TaskSaveRequest, TaskRunRequest, TaskStepResult, TaskRunResponse
 )
 from ha4t.editor.parser.xpath_lite import XPathLiteGenerator
