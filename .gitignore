@@ -130,3 +130,6 @@ dmypy.json
 .idea/
 
 debug.py
+
+# Task files (auto-saved user test cases)
+tasks/untitled_*.py

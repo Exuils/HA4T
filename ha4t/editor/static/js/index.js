@@ -1,5 +1,6 @@
 import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './utils.js';
-import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, runTask, listPackages } from './api.js';
+import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages } from './api.js';
+import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
   { action: 'tap', desc: 'Click element by text (uiautomator2)' },
@@ -49,7 +50,7 @@ new Vue({
 
       rightTab: 'editor',
       yamlFiles: [],
-      currentYamlFile: '',
+      currentYamlFile: getFromLocalStorage('currentYamlFile', ''),
       currentYamlContent: '',
 
       taskName: '',
@@ -113,6 +114,9 @@ new Vue({
   created() {
     this.fetchVersion();
     this.refreshYamlFiles();
+    if (this.currentYamlFile) {
+      this.$nextTick(() => this.loadYamlFile(this.currentYamlFile));
+    }
   },
   async mounted() {
     this.loadCachedScreenshot();
@@ -496,6 +500,7 @@ new Vue({
           this.currentYamlFile = filename;
           this.currentYamlContent = res.data.content;
           this.parseYamlToTask(res.data.content);
+          saveToLocalStorage('currentYamlFile', filename);
           this.addLog('info', `Loaded: ${filename}`);
         }
       } catch (err) {
@@ -554,25 +559,26 @@ new Vue({
     addStep(action, value) {
       const code = this.stepToCode(action, value);
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
-      this.saveCurrentTask();
+      this.ensureFile();
     },
     stepToCode(action, value) {
+      const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
       const m = {
-        tap: `click(text="${value}")`,
+        tap: `click(text="${esc(value)}")`,
         drag: `swipe((300, 300), (300, 700))`,
-        type: `device.driver.send_keys("${value}")`,
-        key: `device.driver.press("${value}")`,
-        launchapp: `start_app("${value}")`,
+        type: `device.driver.send_keys("${esc(value)}")`,
+        key: `device.driver.press("${esc(value)}")`,
+        launchapp: `start_app("${esc(value)}")`,
         wait: `time.sleep(${value})`,
       };
-      return m[action] || value;
+      return m[action] || esc(value);
     },
     stepAction(type, i) {
       if (type === 'run') this.runSingleStep(i);
-      else if (type === 'up' && i > 0) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i - 1, 0, s); this.selectedStepIndex = i - 1; this.saveCurrentTask(); }
-      else if (type === 'down' && i < this.steps.length - 1) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectedStepIndex = i + 1; this.saveCurrentTask(); }
+      else if (type === 'up' && i > 0) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i - 1, 0, s); this.selectedStepIndex = i - 1; this.ensureFile(); }
+      else if (type === 'down' && i < this.steps.length - 1) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectedStepIndex = i + 1; this.ensureFile(); }
       else if (type === 'edit') { this.cliText = this.steps[i].code; this.cliPrefix = ''; this.selectedStepIndex = i; this.$nextTick(() => this.$refs.cliInput.focus()); }
-      else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.saveCurrentTask(); }
+      else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.ensureFile(); }
     },
     selectStep(i) { this.selectedStepIndex = i; },
     stepIcon(status) {
@@ -586,7 +592,15 @@ new Vue({
       s._status = 'running';
       this.$set(this.steps, i, { ...s });
       this.isRunning = true;
-      await this.wsRun(this.taskToYamlSingle(i), i);
+      try {
+        await this.wsRun(this.taskToYamlSingle(i), i);
+      } catch (e) {
+        s._status = 'fail';
+        s._detail = e.message;
+        this.$set(this.steps, i, { ...s });
+        this.addLog('fail', `Step ${i + 1} error: ${e.message}`);
+        this.isRunning = false;
+      }
     },
     async runAllSteps() {
       this.steps.forEach((s, i) => { s._status = 'pending'; s._detail = ''; s._duration = null; this.$set(this.steps, i, { ...s }); });
@@ -594,7 +608,12 @@ new Vue({
       this.logLines = [];
       this.addLog('info', 'Running all steps...');
       this.isRunning = true;
-      await this.wsRun(this.currentYamlContent);
+      try {
+        await this.wsRun(this.currentYamlContent);
+      } catch (e) {
+        this.addLog('fail', `Run error: ${e.message}`);
+        this.isRunning = false;
+      }
     },
     wsRun(yaml, stepOffset) {
       return new Promise((resolve, reject) => {
@@ -657,38 +676,19 @@ new Vue({
       y += '# --step--\n' + this.steps[i].code + '\n';
       return y;
     },
-    async runAllSteps() {
-      this.steps.forEach((s, i) => { s._status = 'pending'; s._detail = ''; s._duration = null; this.$set(this.steps, i, { ...s }); });
-      const yaml = this.taskToYaml();
-      this.currentYamlContent = yaml;
-      this.logLines = [];
-      this.addLog('info', 'Running all steps...');
-      this.isRunning = true;
-      try {
-        const res = await runTask(this.taskPlatform, this.serial, undefined, yaml);
-        if (res.success && res.data) {
-          const results = res.data.steps || [];
-          results.forEach((r, i) => {
-            if (this.steps[i]) {
-              this.steps[i]._status = r.status;
-              this.steps[i]._detail = r.detail || '';
-              this.steps[i]._duration = r.duration;
-              this.$set(this.steps, i, { ...this.steps[i] });
-            }
-          });
-          this.addLog(res.data.success ? 'ok' : 'fail', res.data.summary);
-        } else {
-          this.addLog('fail', res.message || 'Unknown error');
-        }
-      } catch (e) {
-        this.addLog('fail', e.message || String(e));
-      } finally {
-        this.isRunning = false;
-      }
-    },
     saveCurrentTask() {
-      if (!this.currentYamlFile) return;
+      if (!this.currentYamlFile) {
+        this.currentYamlFile = `untitled_${Date.now()}.py`;
+        this.taskName = this.taskName || 'New Test';
+        this.taskPlatform = this.platform || 'android';
+        saveToLocalStorage('currentYamlFile', this.currentYamlFile);
+      }
       this.currentYamlContent = this.taskToYaml();
+      saveTask(this.currentYamlFile, this.currentYamlContent).catch(() => {});
+      this.refreshYamlFiles();
+    },
+    ensureFile() {
+      this.saveCurrentTask();
     },
     async saveYamlFile() {
       if (!this.currentYamlFile) return;
@@ -817,13 +817,23 @@ new Vue({
       if (!this.logOpen) this.logOpen = true;
     },
 
+    async deviceAction(key) {
+      if (!this.isConnected) return;
+      if (this.rightTab !== 'editor') return;
+      const idx = this.steps.length;
+      this.steps.push({ code: `device.driver.press("${key}")`, _status: 'pending', _detail: '', _duration: null });
+      this.ensureFile();
+      this.addLog('info', `Inserted: press("${key}")`);
+      if (this.autoRun) this.runSingleStep(idx);
+    },
+
     onMouseDblClick() {
       if (this.selectedNode && this.rightTab === 'editor') {
         this.insertStepFromElement();
       }
     },
     generateU2Selector(node) {
-      const esc = (s) => (s || '').replace(/"/g, '\\"');
+      const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
       const attrs = [];
       if (node.xpath) attrs.push(`xpath="${esc(node.xpath)}"`);
       if (node.resourceId) attrs.push(`resourceId="${esc(node.resourceId)}"`);
@@ -848,7 +858,7 @@ new Vue({
       const code = `click(${sel})`;
       const idx = this.steps.length;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
-      this.saveCurrentTask();
+      this.ensureFile();
       this.$message({ message: `Inserted: ${code}`, type: 'success' });
       if (this.autoRun) this.runSingleStep(idx);
     }

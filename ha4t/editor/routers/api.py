@@ -102,6 +102,19 @@ def list_packages(platform: str, serial: str):
     return ApiResponse.doSuccess([])
 
 
+@router.post("/{platform}/{serial}/key/{key}", response_model=ApiResponse)
+def press_key(platform: str, serial: str, key: str):
+    device = cached_devices.get((platform, serial))
+    if not device:
+        return ApiResponse.doError("Device not connected")
+    try:
+        if platform == "android" and hasattr(device, 'd'):
+            device.d.press(key)
+        return ApiResponse.doSuccess(f"Pressed {key}")
+    except Exception as e:
+        return ApiResponse.doError(str(e))
+
+
 # ── Task API (.py + # --step--) ──────────────────────────
 
 
@@ -226,7 +239,6 @@ async def ws_run_task(ws: WebSocket):
         )
         step_idx = 0
         prev = None
-        errors = []
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -237,12 +249,10 @@ async def ws_run_task(ws: WebSocket):
                 step_idx += 1
                 await ws.send_json({"type": "step", "index": step_idx + step_offset, "status": "running"})
                 prev = step_idx
-            if 'Error' in line or 'Traceback' in line or 'FAIL' in line:
-                errors.append(line)
             await ws.send_json({"type": "log", "text": line})
         proc.wait()
 
-        all_ok = (proc.returncode == 0 and not errors)
+        all_ok = (proc.returncode == 0)
         if prev:
             await ws.send_json({"type": "step", "index": prev + step_offset, "status": "ok" if all_ok else "fail"})
         ok = total if all_ok else 0

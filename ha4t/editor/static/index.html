@@ -101,7 +101,16 @@
             <div class="left"
                 v-loading="isConnecting || isDumping || isRunning"
                 element-loading-spinner="el-icon-loading"
-                element-loading-background="rgba(0, 0, 0, 0.7)">  
+                element-loading-background="rgba(0, 0, 0, 0.7)">
+                <div class="screen-toolbar">
+                    <el-button-group>
+                        <el-button size="mini" @click="deviceAction('home')" :disabled="!isConnected" title="Home">🏠</el-button>
+                        <el-button size="mini" @click="deviceAction('back')" :disabled="!isConnected" title="Back">↩</el-button>
+                        <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="Vol+">🔊</el-button>
+                        <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="Vol-">🔉</el-button>
+                    </el-button-group>
+                    <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="Refresh">Refresh</el-button>
+                </div>
                 <canvas id="screenshotCanvas"></canvas>
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
@@ -169,7 +178,6 @@
                             </el-select>
                             <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
                             <el-button size="small" @click="newYamlFile">New</el-button>
-                            <el-button size="small" type="primary" @click="saveYamlFile" :disabled="!currentYamlFile">Save</el-button>
                             <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">Run All</el-button>
                             <el-button size="small" @click="settingsVisible = true">Settings</el-button>
                             <el-switch v-model="autoRun" active-text="Auto Run" inactive-text="Manual"
