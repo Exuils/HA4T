@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "HA4T"
-version = "0.0.7"
+version = "0.1.0"
 description = "跨平台的UI自动化框架，适用于混合型app"
 readme = "README.md"
 license = {text = "Apache License 2.0"}
