@@ -432,11 +432,27 @@ new Vue({
     },
     async handleTreeNodeClick(node) {
       this.selectedNode = node;
-
       await this.fetchXpathLite(node._id)
       this.selectedNode && (this.selectedNode.xpath = this.xpathLite);
-
       this.renderHierarchy();
+    },
+    handleTreeHover(node) {
+      if (this.hoveredNode !== node) {
+        this.hoveredNode = node;
+        this.renderHierarchy();
+      }
+    },
+    handleTreeLeave() {
+      this.hoveredNode = null;
+      this.renderHierarchy();
+    },
+    renderTreeContent(h, { node, data }) {
+      return h('span', {
+        on: {
+          mouseenter: () => this.handleTreeHover(data),
+          mouseleave: () => this.handleTreeLeave(),
+        }
+      }, node.label);
     },
     filterNode(value, data) {
       if (!value) return true;

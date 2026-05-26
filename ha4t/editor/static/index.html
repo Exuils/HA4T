@@ -104,7 +104,8 @@
                         <el-tree class="custom-tree" ref="treeRef" :data="treeData"
                             :props="defaultTreeProps" @node-click="handleTreeNodeClick"
                             node-key="_id" default-expand-all
-                            :expand-on-click-node="false" :filter-node-method="filterNode">
+                            :expand-on-click-node="false" :filter-node-method="filterNode"
+                            :render-content="renderTreeContent">
                         </el-tree>
                     </el-tab-pane>
                     <el-tab-pane label="编辑器" name="editor">
