@@ -1,7 +1,6 @@
-# ui-viewer
-[![github actions](https://github.com/codematrixer/ui-viewer/actions/workflows/release.yml/badge.svg)](https://github.com/codematrixer/ui-viewer/actions)
-[![pypi version](https://img.shields.io/pypi/v/uiviewer.svg)](https://pypi.python.org/pypi/uiviewer)
-![python](https://img.shields.io/pypi/pyversions/uiviewer.svg)
+# HA4T Editor
+
+> 鸣谢 [codematrixer/ui-viewer](https://github.com/codematrixer/ui-viewer) (MIT)
 
 UI hierarchy inspector for Mobile App, supporting `Android`, `iOS`, and `HarmonyOS NEXT`. 
 

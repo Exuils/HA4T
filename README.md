@@ -89,5 +89,6 @@ HA4T 的开发得益于以下开源项目：
 - [facebook-wda](https://github.com/openatx/facebook-wda)
 - [paddleocr](https://github.com/PaddlePaddle/PaddleOCR)
 - [ios-webkit-debug-proxy](https://github.com/google/ios-webkit-debug-proxy)
+- [ui-viewer](https://github.com/codematrixer/ui-viewer) (MIT License) — 编辑器模块基于此项目二次开发
 
 如果您觉得HA4T对您有帮助，请考虑给项目一个星标 ⭐️
