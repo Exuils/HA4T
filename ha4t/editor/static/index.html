@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UI Viewer</title>
+    <title>UI 层级查看器</title>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" type="text/css" href="/static/cdn/unpkg.com/element-theme-dark@1.0.2/lib/index.css">
     <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=2">
@@ -13,89 +13,47 @@
     <div id="app">
         <div class="header">
             <div style="margin-right: 20px;">
-                <span style="font-weight: bold; font-size: 20px;">UI Viewer</span>
+                <span style="font-weight: bold; font-size: 20px;">UI 层级查看器</span>
                 <span>{{version}}</span>
             </div>
-            <el-select
-              v-model="platform"
-              placeholder="Select Platform"
-              style="margin-right: 10px; width: 140px"
-              @change="initPlatform">
+            <el-select v-model="platform" placeholder="选择平台"
+                style="margin-right: 10px; width: 140px" @change="initPlatform">
               <el-option label="HarmonyOS" value="harmony"></el-option>
               <el-option label="Android" value="android"></el-option>
               <el-option label="iOS" value="ios"></el-option>
             </el-select>
-  
-            <el-select
-              v-model="serial"
-              placeholder="Select Device"
-              style="margin-right: 20px; width: 250px"
-              @visible-change="listDevice">
-              <el-option
-                v-for="d in devices"
-                :key="d"
-                :label="d"
-                :value="d">
-              </el-option>
+            <el-select v-model="serial" placeholder="选择设备"
+                style="margin-right: 20px; width: 250px" @visible-change="listDevice">
+              <el-option v-for="d in devices" :key="d" :label="d" :value="d"></el-option>
             </el-select>
-
-            <el-tooltip v-if="platform === 'ios'" content="Set WDA url, such as http://localhost:8100" placement="top">
-              <el-input
-                class="custom-input"
-                v-model="wdaUrl"
-                style="width: 180px; margin-right: 20px;"
-                placeholder="WDA server url">
+            <el-tooltip v-if="platform === 'ios'" content="设置 WDA 地址, 如 http://localhost:8100" placement="top">
+              <el-input class="custom-input" v-model="wdaUrl"
+                  style="width: 180px; margin-right: 20px;" placeholder="WDA 地址">
               </el-input>
             </el-tooltip>
-
-            <el-tooltip v-if="platform === 'ios'" content="Set the maximum depth for iOS dump hierarchy, default value is 30" placement="top">
-              <el-input
-                class="custom-input"
-                v-model="snapshotMaxDepth"
-                style="width: 110px; margin-right: 20px;"
-                placeholder="maxDepth">
+            <el-tooltip v-if="platform === 'ios'" content="设置 iOS 层级最大深度, 默认 30" placement="top">
+              <el-input class="custom-input" v-model="snapshotMaxDepth"
+                  style="width: 110px; margin-right: 20px;" placeholder="最大深度">
               </el-input>
             </el-tooltip>
-
-
-            <el-button 
-              :disabled="isConnecting"
-              style="margin-right: 10px; width: 100px;"
-              v-on:click="connectDevice">
+            <el-button :disabled="isConnecting" style="margin-right: 10px; width: 100px;"
+                v-on:click="connectDevice">
               <span v-if="isConnecting" class="el-icon-loading"></span>
-              <span v-else>{{ isConnected ? 'Connected' : 'Connect' }}</span>
+              <span v-else>{{ isConnected ? '已连接' : '连接' }}</span>
             </el-button>
-
-            <el-tooltip
-              v-if="!isConnected"
-              content="Please connect device first"
-              placement="top">
-              <el-button 
-                :disabled="!isConnected || isDumping"
-                style="margin-right: 10px; width: 160px;">
-                <span>Dump Hierarchy</span>
+            <el-tooltip v-if="!isConnected" content="请先连接设备" placement="top">
+              <el-button :disabled="!isConnected || isDumping" style="margin-right: 10px; width: 160px;">
+                <span>获取层级</span>
               </el-button>
             </el-tooltip>
-
-            <el-button 
-              v-else :disabled="isDumping"
-              style="margin-right: 10px; width: 160px;"
-              v-on:click="screenshotAndDumpHierarchy">
-              <span 
-                v-if="isDumping"
-                class="el-icon-loading">
-              </span>
-              <span>Dump Hierarchy</span>
+            <el-button v-else :disabled="isDumping" style="margin-right: 10px; width: 160px;"
+                v-on:click="screenshotAndDumpHierarchy">
+              <span v-if="isDumping" class="el-icon-loading"></span>
+              <span>获取层级</span>
             </el-button>
-    
-            <div style="flex: 1;"></div> <!-- 占据剩余空间 -->
-            <el-link
-              class="custom-link"
-              href="https://github.com/codematrixer/ui-viewer"
-              target="_blank"
-              :underline="false">GitHub
-            </el-link>
-
+            <div style="flex: 1;"></div>
+            <el-link class="custom-link" href="https://github.com/codematrixer/ui-viewer"
+                target="_blank" :underline="false">GitHub</el-link>
         </div>
         <div class="main">
             <div class="left"
@@ -104,97 +62,75 @@
                 element-loading-background="rgba(0, 0, 0, 0.7)">
                 <div class="screen-toolbar">
                     <el-button-group>
-                        <el-button size="mini" @click="deviceAction('home')" :disabled="!isConnected" title="Home">🏠</el-button>
-                        <el-button size="mini" @click="deviceAction('back')" :disabled="!isConnected" title="Back">↩</el-button>
-                        <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="Vol+">🔊</el-button>
-                        <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="Vol-">🔉</el-button>
+                        <el-button size="mini" @click="deviceAction('home')" :disabled="!isConnected" title="主页">🏠</el-button>
+                        <el-button size="mini" @click="deviceAction('back')" :disabled="!isConnected" title="返回">↩</el-button>
+                        <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="音量+">🔊</el-button>
+                        <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="音量-">🔉</el-button>
                     </el-button-group>
-                    <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="Refresh">Refresh</el-button>
+                    <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="刷新">刷新</el-button>
                 </div>
                 <canvas id="screenshotCanvas"></canvas>
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
             <div class="center" :style="{ width: centerWidth + 'px' }">
                 <div class="center-header">
-                    <p class="region-title">Selected Element Info</p>
-                    <el-button v-if="selectedNode" size="small" type="primary" @click="insertStepFromElement" icon="el-icon-plus">
-                        Insert Step
-                    </el-button>
+                    <p class="region-title">元素详情</p>
+                    <el-button v-if="selectedNode" size="small" type="primary"
+                        @click="insertStepFromElement" icon="el-icon-plus">插入步骤</el-button>
                 </div>
-                <el-table
-                  :data="selectedNodeDetails"
-                  style="width: 100%"
-                  class="custom-table">
-                  <el-table-column prop="key" label="Key" width="30%"></el-table-column>
-                  <el-table-column label="Value" width="70%">
+                <el-table :data="selectedNodeDetails" style="width: 100%" class="custom-table">
+                  <el-table-column prop="key" label="属性" width="30%"></el-table-column>
+                  <el-table-column label="值" width="70%">
                     <template slot-scope="scope">
                       <code style="padding: 0 5px;">{{ scope.row.value }}</code>
-                      <el-button
-                        class="el-button attr-button"
-                        @click="copyToClipboard(scope.row.value)">复制
-                      </el-button>
+                      <el-button class="el-button attr-button"
+                          @click="copyToClipboard(scope.row.value)">复制</el-button>
                     </template>
                   </el-table-column>
                 </el-table>
             </div>
-            <div
-              class="divider" 
-              @mousedown="startDrag" 
-              @mouseenter="hoverDivider" 
+            <div class="divider"
+              @mousedown="startDrag"
+              @mouseenter="hoverDivider"
               @mouseleave="leaveDivider"
               :class="{ 'divider-hover': isDividerHovered, 'divider-dragging': isDragging }">
             </div>
-
             <div class="right">
                 <el-tabs v-model="rightTab" class="right-tabs">
-                    <el-tab-pane label="Hierarchy" name="hierarchy">
-                        <el-input
-                          class="custom-input"
-                          placeholder="Search for ..."
-                          style="margin-left: 10px; margin-bottom: 6px;"
-                          v-model="nodeFilterText">
+                    <el-tab-pane label="层级" name="hierarchy">
+                        <el-input class="custom-input" placeholder="搜索..."
+                            style="margin-left: 10px; margin-bottom: 6px;" v-model="nodeFilterText">
                         </el-input>
-                        <el-tree
-                            class="custom-tree"
-                            ref="treeRef"
-                            :data="treeData"
-                            :props="defaultTreeProps"
-                            @node-click="handleTreeNodeClick"
-                            node-key="_id"
-                            default-expand-all
-                            :expand-on-click-node="false"
-                            :filter-node-method="filterNode">
+                        <el-tree class="custom-tree" ref="treeRef" :data="treeData"
+                            :props="defaultTreeProps" @node-click="handleTreeNodeClick"
+                            node-key="_id" default-expand-all
+                            :expand-on-click-node="false" :filter-node-method="filterNode">
                         </el-tree>
                     </el-tab-pane>
-                    <el-tab-pane label="Editor" name="editor">
-                        <!-- toolbar -->
+                    <el-tab-pane label="编辑器" name="editor">
                         <div class="editor-toolbar">
-                            <el-select v-model="currentYamlFile" placeholder="Select test case" size="small"
+                            <el-select v-model="currentYamlFile" placeholder="选择用例文件" size="small"
                                 style="flex: 1;" @change="loadYamlFile" clearable>
                                 <el-option v-for="f in yamlFiles" :key="f.filename" :label="f.name" :value="f.filename">
                                     <span>{{ f.name }}</span>
-                                    <span style="float: right; color: #8492a6; font-size: 11px;">{{ f.step_count }} steps | {{ f.platform }}</span>
+                                    <span style="float: right; color: #8492a6; font-size: 11px;">{{ f.step_count }} 步 | {{ f.platform }}</span>
                                 </el-option>
                             </el-select>
                             <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
-                            <el-button size="small" @click="newYamlFile">New</el-button>
-                            <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">Run All</el-button>
-                            <el-button size="small" @click="settingsVisible = true">Settings</el-button>
-                            <el-switch v-model="autoRun" active-text="Auto Run" inactive-text="Manual"
+                            <el-button size="small" @click="newYamlFile">新建</el-button>
+                            <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">全部运行</el-button>
+                            <el-button size="small" @click="settingsVisible = true">设置</el-button>
+                            <el-switch v-model="autoRun" active-text="自动运行" inactive-text="手动"
                                 size="small" style="margin-left: 4px;"></el-switch>
                         </div>
-
-                        <!-- meta info bar -->
                         <div class="editor-meta">
-                            <span class="meta-item">Platform: <b>{{ taskPlatform }}</b></span>
-                            <span class="meta-item" v-if="taskName">Name: <b>{{ taskName }}</b></span>
-                            <span class="meta-item">Steps: <b>{{ steps.length }}</b></span>
+                            <span class="meta-item">平台: <b>{{ taskPlatform }}</b></span>
+                            <span class="meta-item" v-if="taskName">名称: <b>{{ taskName }}</b></span>
+                            <span class="meta-item">步骤: <b>{{ steps.length }}</b></span>
                         </div>
-
-                        <!-- step list -->
-                        <div class="step-list" ref="stepList">  
+                        <div class="step-list" ref="stepList">
                             <div v-if="steps.length === 0" class="step-empty">
-                                Type a command below, or press <b>/</b> to choose an action
+                                在下方输入命令, 或按 <b>/</b> 选择动作
                             </div>
                             <div v-for="(s, i) in steps" :key="i" class="step-row"
                                 :class="{ 'step-selected': selectedStepIndex === i }"
@@ -206,17 +142,15 @@
                                 <code class="step-code">{{ s.code }}</code>
                                 <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
                                 <div class="step-btns">
-                                    <button class="sb" @click.stop="stepAction('run', i)" title="Run">&#9654;</button>
-                                    <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="Up">&#8593;</button>
-                                    <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="Down">&#8595;</button>
-                                    <button class="sb" @click.stop="stepAction('edit', i)" title="Edit">E</button>
-                                    <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="Delete">X</button>
+                                    <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
+                                    <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
+                                    <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
+                                    <button class="sb" @click.stop="stepAction('edit', i)" title="编辑">E</button>
+                                    <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
                                 </div>
                                 <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
                             </div>
                         </div>
-
-                        <!-- cli input -->
                         <div class="cli-wrap">
                             <span class="cli-prefix" v-if="cliPrefix">{{ cliPrefix }}:</span>
                             <span class="cli-prompt">&gt;</span>
@@ -224,7 +158,6 @@
                                 @keydown="onCliKeydown" @input="onCliInput"
                                 :placeholder="cliPlaceholder"
                                 spellcheck="false" autocomplete="off" />
-                            <!-- slash palette -->
                             <div class="slash-palette" v-if="slashVisible">
                                 <div v-for="(item, idx) in slashItems" :key="idx"
                                     class="slash-item" :class="{ 'slash-hl': idx === slashIdx }"
@@ -235,11 +168,9 @@
                                 </div>
                             </div>
                         </div>
-
-                        <!-- log panel (collapsible) -->
                         <div class="log-panel" :class="{ 'log-open': logOpen }">
                             <div class="log-header" @click="logOpen = !logOpen">
-                                Log {{ logLines.length ? '(' + logLines.length + ')' : '' }}
+                                日志 {{ logLines.length ? '(' + logLines.length + ')' : '' }}
                                 <span class="log-arrow">{{ logOpen ? '&#9660;' : '&#9650;' }}</span>
                             </div>
                             <div class="log-body" v-if="logOpen">
@@ -248,17 +179,15 @@
                             </div>
                         </div>
                     </el-tab-pane>
-
-                    <!-- Settings Modal -->
-                    <el-dialog title="Task Settings" :visible.sync="settingsVisible" width="420px" top="15vh">
-                        <el-form label-width="100px" size="small">
-                            <el-form-item label="Task Name">
+                    <el-dialog title="用例设置" :visible.sync="settingsVisible" width="420px" top="15vh">
+                        <el-form label-width="80px" size="small">
+                            <el-form-item label="名称">
                                 <el-input v-model="taskName"></el-input>
                             </el-form-item>
-                            <el-form-item label="Description">
+                            <el-form-item label="描述">
                                 <el-input v-model="taskDesc" type="textarea" :rows="2"></el-input>
                             </el-form-item>
-                            <el-form-item label="Platform">
+                            <el-form-item label="平台">
                                 <el-select v-model="taskPlatform" style="width: 100%;">
                                     <el-option label="Android" value="android"></el-option>
                                     <el-option label="iOS" value="ios"></el-option>
@@ -267,18 +196,17 @@
                             </el-form-item>
                         </el-form>
                         <span slot="footer">
-                            <el-button @click="settingsVisible = false" size="small">Cancel</el-button>
-                            <el-button type="primary" @click="applySettings" size="small">OK</el-button>
+                            <el-button @click="settingsVisible = false" size="small">取消</el-button>
+                            <el-button type="primary" @click="applySettings" size="small">确定</el-button>
                         </span>
                     </el-dialog>
                 </el-tabs>
             </div>
         </div>
     </div>
-    
     <script src="/static/cdn/code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/static/cdn/cdn.jsdelivr.net/npm/vue@2"></script>
     <script src="/static/cdn/unpkg.com/element-ui/lib/index.js"></script>
-    <script type="module" src="/static/js/index.js?v=2"></script> 
+    <script type="module" src="/static/js/index.js?v=2"></script>
 </body>
 </html>

@@ -1,15 +1,15 @@
-import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './utils.js';
+﻿import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './utils.js';
 import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages } from './api.js';
 import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
-  { action: 'tap', desc: 'Click element by text (uiautomator2)' },
-  { action: 'drag', desc: 'Drag gesture - generates swipe()' },
-  { action: 'type', desc: 'Type text - generates send_keys()' },
-  { action: 'key', desc: 'Press system key - generates press()' },
-  { action: 'launchapp', desc: 'Launch app - generates start_app()' },
-  { action: 'wait', desc: 'Wait seconds - generates time.sleep()' },
-  { action: 'code', desc: 'Custom Python code line' },
+  { action: 'tap', desc: '点击元素 (uiautomator2)' },
+  { action: 'drag', desc: '拖拽手势' },
+  { action: 'type', desc: '输入文本' },
+  { action: 'key', desc: '系统按键' },
+  { action: 'launchapp', desc: '启动应用' },
+  { action: 'wait', desc: '等待秒数' },
+  { action: 'code', desc: '自定义代码' },
 ];
 
 
@@ -157,17 +157,17 @@ new Vue({
           this.serial = this.devices[0];
         }
       } catch (err) {
-        this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
+        this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       }
     },
     async connectDevice() {
       this.isConnecting = true;
       try {
         if (!this.serial) {
-          throw new Error('Please select device first');
+          throw new Error('请先选择设备');
         }
         if (this.platform === 'ios' && !this.wdaUrl) {
-          throw new Error('Please input wdaUrl first');
+          throw new Error('请输入 WDA 地址');
         }
 
         const response = await connectDevice(this.platform, this.serial, this.wdaUrl, this.snapshotMaxDepth);
@@ -179,7 +179,7 @@ new Vue({
           throw new Error(response.message);
         }
       } catch (err) {
-        this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
+        this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       } finally {
         this.isConnecting = false;
       }
@@ -190,7 +190,7 @@ new Vue({
         await this.fetchScreenshot();
         await this.fetchHierarchy();
       } catch (err) {
-        this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
+        this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       } finally {
         this.isDumping = false;
       }
@@ -501,10 +501,10 @@ new Vue({
           this.currentYamlContent = res.data.content;
           this.parseYamlToTask(res.data.content);
           saveToLocalStorage('currentYamlFile', filename);
-          this.addLog('info', `Loaded: ${filename}`);
+          this.addLog('info', `已加载: ${filename}`);
         }
       } catch (err) {
-        this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
+        this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       }
     },
     parseYamlToTask(content) {
@@ -538,7 +538,7 @@ new Vue({
       this.steps = steps; this._extraLines = extraLines;
     },
     taskToYaml() {
-      let y = `# name: ${this.taskName || 'Untitled'}\n`;
+      let y = `# name: ${this.taskName || '未命名'}\n`;
       if (this.taskDesc) y += `# desc: ${this.taskDesc}\n`;
       y += `# platform: ${this.taskPlatform}\n`;
       y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
@@ -587,7 +587,7 @@ new Vue({
       return { icon: m[status] || '○', cls: 'icon-' + status };
     },
     async runSingleStep(i) {
-      if (!this.isConnected) { this.$message({ message: 'Not connected', type: 'warning' }); return; }
+      if (!this.isConnected) {       this.$message({ showClose: true, message: '尚未连接设备', type: 'warning' }); return; }
       const s = this.steps[i];
       s._status = 'running';
       this.$set(this.steps, i, { ...s });
@@ -598,7 +598,7 @@ new Vue({
         s._status = 'fail';
         s._detail = e.message;
         this.$set(this.steps, i, { ...s });
-        this.addLog('fail', `Step ${i + 1} error: ${e.message}`);
+        this.addLog('fail', `步骤 ${i + 1} 错误: ${e.message}`);
         this.isRunning = false;
       }
     },
@@ -606,12 +606,12 @@ new Vue({
       this.steps.forEach((s, i) => { s._status = 'pending'; s._detail = ''; s._duration = null; this.$set(this.steps, i, { ...s }); });
       this.currentYamlContent = this.taskToYaml();
       this.logLines = [];
-      this.addLog('info', 'Running all steps...');
+      this.addLog('info', '正在执行全部步骤...');
       this.isRunning = true;
       try {
         await this.wsRun(this.currentYamlContent);
       } catch (e) {
-        this.addLog('fail', `Run error: ${e.message}`);
+        this.addLog('fail', `运行错误: ${e.message}`);
         this.isRunning = false;
       }
     },
@@ -646,7 +646,7 @@ new Vue({
           } else if (msg.type === 'log') {
             this.addLog('info', msg.text);
           } else if (msg.type === 'done') {
-            this.addLog(msg.fail ? 'fail' : 'ok', `${msg.ok}/${msg.total} steps passed`);
+            this.addLog(msg.fail ? 'fail' : 'ok', `${msg.ok}/${msg.total} 步通过`);
             this.scheduleDump();
             ws.close();
             resolve();
@@ -657,8 +657,8 @@ new Vue({
           }
         };
         ws.onerror = (e) => {
-          this.addLog('fail', 'WebSocket connection error');
-          reject(new Error('WS error'));
+          this.addLog('fail', 'WebSocket 连接错误');
+          reject(new Error('WS 错误'));
         };
       });
     },
@@ -679,7 +679,7 @@ new Vue({
     saveCurrentTask() {
       if (!this.currentYamlFile) {
         this.currentYamlFile = `untitled_${Date.now()}.py`;
-        this.taskName = this.taskName || 'New Test';
+        this.taskName = this.taskName || '新建用例';
         this.taskPlatform = this.platform || 'android';
         saveToLocalStorage('currentYamlFile', this.currentYamlFile);
       }
@@ -696,16 +696,16 @@ new Vue({
       try {
         const res = await saveTask(this.currentYamlFile, this.currentYamlContent);
         if (res.success) {
-          this.$message({ showClose: true, message: 'Saved', type: 'success' });
+          this.$message({ showClose: true, message: '已保存', type: 'success' });
           this.refreshYamlFiles();
         }
       } catch (err) {
-        this.$message({ showClose: true, message: `Error: ${err.message}`, type: 'error' });
+        this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       }
     },
     newYamlFile() {
       this.clearTask();
-      this.taskName = 'New Test';
+      this.taskName = '新建用例';
       this.taskPlatform = 'android';
       this.settingsVisible = true;
     },
@@ -794,19 +794,19 @@ new Vue({
     },
     async loadApps() {
       if (!this.isConnected || !this.serial) {
-        this.$message({ message: 'Please connect to a device first', type: 'warning' });
+        this.$message({ message: '请先连接设备', type: 'warning' });
         return;
       }
       if (this.appsCache.length) return;
       try {
-        this.addLog('info', 'Fetching installed packages...');
+        this.addLog('info', '正在获取已安装应用...');
         const res = await listPackages(this.platform, this.serial);
         if (res.success) {
           this.appsCache = res.data || [];
-          this.addLog('info', `Found ${this.appsCache.length} packages`);
+          this.addLog('info', `找到 ${this.appsCache.length} 个应用`);
           this.onCliInput();
         } else {
-          this.$message({ message: res.message || 'Failed to fetch packages', type: 'error' });
+          this.$message({ message: res.message || '失败 to fetch 个应用', type: 'error' });
         }
       } catch (e) {
         this.$message({ message: `Error: ${e.message}`, type: 'error' });
@@ -823,7 +823,7 @@ new Vue({
       const idx = this.steps.length;
       this.steps.push({ code: `device.driver.press("${key}")`, _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
-      this.addLog('info', `Inserted: press("${key}")`);
+      this.addLog('info', `已插入: press("${key}")`);
       if (this.autoRun) this.runSingleStep(idx);
     },
 
@@ -847,19 +847,19 @@ new Vue({
     insertStepFromElement() {
       if (!this.selectedNode) return;
       if (this.rightTab !== 'editor') {
-        this.$message({ message: 'Switch to Editor tab to insert steps', type: 'info' });
+        this.$message({ message: '切换到编辑器标签页后再插入步骤', type: 'info' });
         return;
       }
       const sel = this.generateU2Selector(this.selectedNode);
       if (!sel) {
-        this.$message({ message: 'No usable selector found for this element', type: 'warning' });
+        this.$message({ message: '该元素无可用选择器', type: 'warning' });
         return;
       }
       const code = `click(${sel})`;
       const idx = this.steps.length;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
-      this.$message({ message: `Inserted: ${code}`, type: 'success' });
+      this.$message({ message: `已插入: ${code}`, type: 'success' });
       if (this.autoRun) this.runSingleStep(idx);
     }
   }
