@@ -20,13 +20,16 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: 安装uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 安装依赖
+        run: |
           uv pip install --system -r docs/requirements.txt
           uv pip install --system -e .
-        
-          
+
       - name: 构建文档
         run: |
           cd docs
