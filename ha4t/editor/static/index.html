@@ -7,6 +7,7 @@
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" type="text/css" href="/static/cdn/unpkg.com/element-theme-dark@1.0.2/lib/index.css">
     <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=2">
+    <script src="/static/cdn/tailwindcss.js"></script>
 
 </head>
 <body>
@@ -61,15 +62,17 @@
                 element-loading-spinner="el-icon-loading"
                 element-loading-background="rgba(0, 0, 0, 0.7)">
                 <div class="screen-toolbar">
-                    <el-button-group>
-                        <el-button size="mini" @click="deviceAction('home')" :disabled="!isConnected" title="主页">🏠</el-button>
-                        <el-button size="mini" @click="deviceAction('back')" :disabled="!isConnected" title="返回">↩</el-button>
-                        <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="音量+">🔊</el-button>
-                        <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="音量-">🔉</el-button>
-                    </el-button-group>
-                    <el-button size="mini" @click="enterCaptureMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="添加图片定位步骤">🎯</el-button>
-                    <el-button size="mini" @click="enterSwipeRecordMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="录制滑动手势">👆</el-button>
-                    <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="刷新">刷新</el-button>
+                    <div class="toolbar-left">
+                        <el-button size="mini" @click="deviceAction('home')" :disabled="!isConnected" title="主页" icon="el-icon-arrow-up"></el-button>
+                        <el-button size="mini" @click="deviceAction('back')" :disabled="!isConnected" title="返回" icon="el-icon-back"></el-button>
+                        <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="音量+" icon="el-icon-plus"></el-button>
+                        <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="音量-" icon="el-icon-minus"></el-button>
+                    </div>
+                    <div class="toolbar-right">
+                        <el-button size="mini" @click="enterCaptureMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="添加图片定位步骤" icon="el-icon-picture-outline"></el-button>
+                        <el-button size="mini" @click="enterSwipeRecordMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="录制滑动手势" icon="el-icon-rank"></el-button>
+                        <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" title="刷新" icon="el-icon-refresh"></el-button>
+                    </div>
                 </div>
                 <div v-if="captureMode" class="capture-indicator">拖拽选择目标区域 (按 Esc 取消)</div>
                 <div v-if="swipeRecordMode" class="capture-indicator swipe-indicator">点击截图记录滑动起点和终点 (按 Esc 取消)</div>
@@ -77,21 +80,122 @@
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
             <div class="center" :style="{ width: centerWidth + 'px' }">
-                <div class="center-header">
-                    <p class="region-title">元素详情</p>
-                    <el-button v-if="selectedNode" size="small" type="primary"
-                        @click="insertStepFromElement" icon="el-icon-plus">插入步骤</el-button>
-                </div>
-                <el-table :data="selectedNodeDetails" style="width: 100%" class="custom-table">
-                  <el-table-column prop="key" label="属性" width="30%"></el-table-column>
-                  <el-table-column label="值" width="70%">
-                    <template slot-scope="scope">
-                      <code style="padding: 0 5px;">{{ scope.row.value }}</code>
-                      <el-button class="el-button attr-button"
-                          @click="copyToClipboard(scope.row.value)">复制</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
+                <!-- Element details when UI element selected -->
+                <template v-if="selectedNode && !selectedStep">
+                    <div class="center-header">
+                        <p class="region-title">元素详情</p>
+                        <el-button v-if="selectedNode" size="small" type="primary"
+                            @click="insertStepFromElement" icon="el-icon-plus">插入步骤</el-button>
+                    </div>
+                    <el-table :data="selectedNodeDetails" style="width: 100%" class="custom-table">
+                      <el-table-column prop="key" label="属性" width="30%"></el-table-column>
+                      <el-table-column label="值" width="70%">
+                        <template slot-scope="scope">
+                          <code style="padding: 0 5px;">{{ scope.row.value }}</code>
+                          <el-button class="el-button attr-button"
+                              @click="copyToClipboard(scope.row.value)">复制</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                </template>
+                <!-- Step properties when step selected -->
+                <template v-else-if="selectedStep">
+                    <div class="center-header">
+                        <p class="region-title">步骤属性</p>
+                        <span class="step-type-badge" v-if="stepConfig">{{ stepConfig.type }}</span>
+                    </div>
+                    <div class="step-props" v-if="stepConfig">
+                        <div class="prop-row">
+                            <label class="prop-label">代码</label>
+                            <code class="prop-code-readonly">{{ selectedStep.code }}</code>
+                        </div>
+                        <!-- Image locate -->
+                        <template v-if="stepConfig.type === 'imglocate'">
+                            <div class="img-prop-preview">
+                                <img :src="selectedStep.image" id="imgConfigPreview" @load="renderImgConfigGrid" />
+                                <canvas id="imgConfigCanvas" @click="onGridCellClick"></canvas>
+                            </div>
+                            <div class="prop-row">
+                                <label class="prop-label">操作</label>
+                                <el-radio-group :value="selectedStep.action" @input="v => _updateImgField('action', v)" size="small">
+                                    <el-radio-button label="click">点击</el-radio-button>
+                                    <el-radio-button label="wait_show">等待显示</el-radio-button>
+                                    <el-radio-button label="wait_hide">等待消失</el-radio-button>
+                                </el-radio-group>
+                            </div>
+                            <template v-if="selectedStep.action === 'click'">
+                                <div class="prop-row">
+                                    <label class="prop-label">横向分割</label>
+                                    <el-slider :value="selectedStep.grid_h" @input="v => _updateImgField('grid_h', v)" :min="1" :max="15" show-stops style="flex:1"></el-slider>
+                                    <span class="prop-val">{{ selectedStep.grid_h }}</span>
+                                </div>
+                                <div class="prop-row">
+                                    <label class="prop-label">纵向分割</label>
+                                    <el-slider :value="selectedStep.grid_v" @input="v => _updateImgField('grid_v', v)" :min="1" :max="15" show-stops style="flex:1"></el-slider>
+                                    <span class="prop-val">{{ selectedStep.grid_v }}</span>
+                                </div>
+                                <div class="prop-row">
+                                    <label class="prop-label">点击列</label>
+                                    <el-input-number :value="selectedStep.click_col" @input="v => _updateImgField('click_col', v)" :min="0" :max="Math.max(selectedStep.grid_h - 1, 0)" size="small"></el-input-number>
+                                </div>
+                                <div class="prop-row">
+                                    <label class="prop-label">点击行</label>
+                                    <el-input-number :value="selectedStep.click_row" @input="v => _updateImgField('click_row', v)" :min="0" :max="Math.max(selectedStep.grid_v - 1, 0)" size="small"></el-input-number>
+                                </div>
+                            </template>
+                            <div class="prop-row">
+                                <label class="prop-label">超时</label>
+                                <el-input-number :value="selectedStep.timeout" @input="v => _updateImgField('timeout', v)" :min="1" :max="60" size="small"></el-input-number>
+                                <span style="color:#888;font-size:12px;margin-left:4px">秒</span>
+                            </div>
+                            <div class="prop-row">
+                                <label class="prop-label">阈值</label>
+                                <el-input :value="selectedStep.threshold ?? ''" @input="v => _updateImgField('threshold', v === '' ? null : parseFloat(v))" size="small" placeholder="默认 0.8" style="width:120px"></el-input>
+                            </div>
+                        </template>
+                        <!-- Swipe -->
+                        <template v-if="stepConfig.type === 'swipe'">
+                            <div class="prop-row" v-for="(v, k) in stepConfig.fields" :key="k">
+                                <label class="prop-label">{{ {x1:'起点X', y1:'起点Y', x2:'终点X', y2:'终点Y'}[k] || k }}</label>
+                                <el-input-number :value="v" @input="val => updateStepField(k, val)" :min="0" :max="1" :step="0.01" size="small" style="width:140px"></el-input-number>
+                            </div>
+                        </template>
+                        <!-- Tap -->
+                        <template v-if="stepConfig.type === 'tap'">
+                            <div class="prop-row">
+                                <label class="prop-label">选择器</label>
+                                <el-input :value="stepConfig.fields.selector" @input="v => updateStepField('selector', v)" size="small" placeholder='text="..."' class="prop-input-wide"></el-input>
+                            </div>
+                        </template>
+                        <!-- Type / Key / LaunchApp -->
+                        <template v-if="['type','key','launchapp'].includes(stepConfig.type)">
+                            <div class="prop-row">
+                                <label class="prop-label">{{ {type:'文本', key:'按键', launchapp:'包名'}[stepConfig.type] }}</label>
+                                <el-input :value="Object.values(stepConfig.fields)[0] || ''" @input="v => updateStepField(stepConfig.type, v)" size="small" class="prop-input-wide"></el-input>
+                            </div>
+                        </template>
+                        <!-- Wait -->
+                        <template v-if="stepConfig.type === 'wait'">
+                            <div class="prop-row">
+                                <label class="prop-label">秒数</label>
+                                <el-input-number :value="stepConfig.fields.seconds" @input="v => updateStepField('wait', v)" :min="0.1" :step="0.5" size="small"></el-input-number>
+                            </div>
+                        </template>
+                        <!-- Raw code -->
+                        <template v-if="stepConfig.type === 'code'">
+                            <div class="prop-row prop-code-row">
+                                <el-input type="textarea" :value="selectedStep.code" @input="v => updateStepField('code', v)" :rows="5" class="prop-textarea"></el-input>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <!-- Empty state -->
+                <template v-else>
+                    <div class="center-header">
+                        <p class="region-title">属性</p>
+                    </div>
+                    <div class="prop-empty">点击步骤查看和编辑属性</div>
+                </template>
             </div>
             <div class="divider"
               @mousedown="startDrag"
@@ -121,12 +225,24 @@
                                     <span style="float: right; color: #8492a6; font-size: 11px;">{{ f.step_count }} 步 | {{ f.platform }}</span>
                                 </el-option>
                             </el-select>
-                            <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
-                            <el-button size="small" @click="newYamlFile">新建</el-button>
-                            <el-button size="small" @click="openTasksFolder" icon="el-icon-folder-opened">文件夹</el-button>
-                            <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">全部运行</el-button>
-                            <el-button size="small" @click="cleanupTaskImages" :disabled="!projectId" title="清理未引用图片">🧹</el-button>
-                            <el-button size="small" @click="settingsVisible = true">设置</el-button>
+                            <el-tooltip content="刷新文件列表" placement="top">
+                                <el-button size="small" @click="refreshYamlFiles" icon="el-icon-refresh" circle></el-button>
+                            </el-tooltip>
+                            <el-tooltip content="新建用例" placement="top">
+                                <el-button size="small" @click="newYamlFile" icon="el-icon-circle-plus-outline"></el-button>
+                            </el-tooltip>
+                            <el-tooltip content="打开文件夹" placement="top">
+                                <el-button size="small" @click="openTasksFolder" icon="el-icon-document"></el-button>
+                            </el-tooltip>
+                            <el-tooltip content="全部运行" placement="top">
+                                <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length" icon="el-icon-circle-check"></el-button>
+                            </el-tooltip>
+                            <el-tooltip content="清理未引用图片" placement="top">
+                                <el-button size="small" @click="cleanupTaskImages" :disabled="!projectId" icon="el-icon-delete"></el-button>
+                            </el-tooltip>
+                            <el-tooltip content="设置" placement="top">
+                                <el-button size="small" @click="settingsVisible = true" icon="el-icon-setting"></el-button>
+                            </el-tooltip>
                             <el-switch v-model="autoRun" active-text="自动运行" inactive-text="手动"
                                 size="small" style="margin-left: 4px;"></el-switch>
                         </div>
@@ -154,7 +270,6 @@
                                         <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
                                         <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
                                         <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
-                                        <button class="sb" @click.stop="stepAction('edit', i)" title="编辑">E</button>
                                         <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
                                     </div>
                                     <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
@@ -182,7 +297,6 @@
                                                 <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
                                                 <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
                                                 <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
-                                                <button class="sb" @click.stop="openImgConfig(i)" title="配置">⚙</button>
                                                 <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
                                             </div>
                                             <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
@@ -238,49 +352,6 @@
                         <span slot="footer">
                             <el-button @click="settingsVisible = false" size="small">取消</el-button>
                             <el-button type="primary" @click="applySettings" size="small">确定</el-button>
-                        </span>
-                    </el-dialog>
-                    <el-dialog title="图片定位配置" :visible.sync="imgConfigVisible" width="480px" top="10vh">
-                        <div v-if="imgConfigStep" class="img-config-body">
-                            <div class="img-config-preview-wrap">
-                                <img v-if="imgConfigStep.image" :src="imgConfigStep.image" class="img-config-preview" ref="imgConfigPreview" @load="renderImgConfigGrid" />
-                                <canvas class="img-config-grid" ref="imgConfigCanvas" @click="onGridCellClick" v-if="imgConfigStep.action === 'click'"></canvas>
-                            </div>
-                            <el-form label-width="90px" size="small">
-                                <el-form-item label="操作类型">
-                                    <el-radio-group v-model="imgConfigStep.action">
-                                        <el-radio-button label="click">点击</el-radio-button>
-                                        <el-radio-button label="wait_show">等待显示</el-radio-button>
-                                        <el-radio-button label="wait_hide">等待消失</el-radio-button>
-                                    </el-radio-group>
-                                </el-form-item>
-                                <el-form-item label="横向分割" v-if="imgConfigStep.action === 'click'">
-                                    <el-slider v-model="imgConfigStep.grid_h" :min="1" :max="15" show-stops @change="renderImgConfigGrid"></el-slider>
-                                </el-form-item>
-                                <el-form-item label="纵向分割" v-if="imgConfigStep.action === 'click'">
-                                    <el-slider v-model="imgConfigStep.grid_v" :min="1" :max="15" show-stops @change="renderImgConfigGrid"></el-slider>
-                                </el-form-item>
-                                <el-form-item label="点击列" v-if="imgConfigStep.action === 'click'">
-                                    <el-input-number v-model="imgConfigStep.click_col" :min="0" :max="imgConfigStep.grid_h - 1" size="small"></el-input-number>
-                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">(从左到右, 0开始)</span>
-                                </el-form-item>
-                                <el-form-item label="点击行" v-if="imgConfigStep.action === 'click'">
-                                    <el-input-number v-model="imgConfigStep.click_row" :min="0" :max="imgConfigStep.grid_v - 1" size="small"></el-input-number>
-                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">(从上到下, 0开始)</span>
-                                </el-form-item>
-                                <el-form-item label="超时时间">
-                                    <el-input-number v-model="imgConfigStep.timeout" :min="1" :max="60" size="small"></el-input-number>
-                                    <span style="margin-left: 8px;">秒</span>
-                                </el-form-item>
-                                <el-form-item label="匹配阈值">
-                                    <el-input v-model="thresholdInput" size="small" placeholder="默认 (0.8)" style="width: 120px;"></el-input>
-                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">{{ thresholdInput ? '' : '使用系统默认 0.8' }}</span>
-                                </el-form-item>
-                            </el-form>
-                        </div>
-                        <span slot="footer">
-                            <el-button @click="imgConfigVisible = false" size="small">取消</el-button>
-                            <el-button type="primary" @click="applyImgConfig" size="small">确定</el-button>
                         </span>
                     </el-dialog>
             </div>

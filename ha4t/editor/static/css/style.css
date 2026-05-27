@@ -81,22 +81,34 @@ body, html {
     z-index: 10;
     display: flex;
     justify-content: space-between;
-    padding: 3px 6px;
+    align-items: center;
+    padding: 2px 8px;
     background: rgba(30, 38, 48, 0.85);
     border-bottom: 1px solid #333844;
-    height: 29px;
+    height: 32px;
+}
+.screen-toolbar .toolbar-left,
+.screen-toolbar .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 .screen-toolbar .el-button {
-    padding: 2px 6px;
-    font-size: 11px;
-    height: 23px;
+    padding: 4px 7px;
+    font-size: 14px;
+    height: 26px;
+    line-height: 1;
+}
+.screen-toolbar .el-button [class*=el-icon-] {
+    font-size: 14px;
+    vertical-align: middle;
 }
 #screenshotCanvas, #hierarchyCanvas {
     position: absolute;
-    top: 29px;
+    top: 32px;
     left: 0;
     width: 100%;
-    height: calc(100% - 29px);
+    height: calc(100% - 32px);
 }
 .center {
     width: 30%;
@@ -184,7 +196,6 @@ body, html {
     margin-left: 5px;
 }
 
-}
 
 code {
     background-color: #2D3740;
@@ -542,4 +553,98 @@ code {
     position: absolute;
     pointer-events: auto;
     cursor: crosshair;
+}
+
+/* ── Step Properties Panel ── */
+.step-props {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px;
+}
+.prop-empty {
+    padding: 20px;
+    text-align: center;
+    color: #555;
+    font-size: 12px;
+}
+.prop-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #2a3040;
+    min-height: 32px;
+}
+.prop-label {
+    color: #888;
+    font-size: 12px;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+.prop-val {
+    color: #888;
+    font-size: 12px;
+    min-width: 20px;
+    text-align: right;
+}
+.prop-code-readonly {
+    flex: 1;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: #1a2530;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+.prop-input-wide {
+    flex: 1;
+}
+.prop-code-row {
+    padding: 0;
+}
+.prop-textarea {
+    width: 100%;
+}
+.prop-textarea .el-textarea__inner {
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 12px;
+    background: #1a2530;
+    color: #e0e0e0;
+    border-color: #2a3040;
+}
+
+/* ── Image Preview in Property Panel ── */
+.img-prop-preview {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    background: #1a2530;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #2a3040;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+.img-prop-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.img-prop-preview canvas {
+    position: absolute;
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+/* ── Step Type Badge ── */
+.step-type-badge {
+    background: #3679E3;
+    color: #fff;
+    padding: 1px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    margin-right: 10px;
 }

@@ -1,0 +1,211 @@
+export const PropertyPanelMethods = {
+  computedStepType() {
+    const s = this.selectedStep;
+    if (!s) return null;
+    const c = s.code;
+    if (s._type === 'imglocate') return 'imglocate';
+    if (/^swipe\(/.test(c)) return 'swipe';
+    if (/^click\(/.test(c)) return 'tap';
+    if (c.includes('send_keys(')) return 'type';
+    if (c.includes('press(')) return 'key';
+    if (c.startsWith('start_app(')) return 'launchapp';
+    if (c.startsWith('time.sleep(')) return 'wait';
+    return 'code';
+  },
+
+  selectedStepConfig() {
+    const s = this.selectedStep;
+    if (!s) return null;
+    const config = { type: this.computedStepType(), fields: {} };
+    const c = s.code;
+    switch (config.type) {
+      case 'imglocate':
+        config.fields = this._imgFields();
+        break;
+      case 'swipe': {
+        const m = c.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/);
+        config.fields = m ? { x1: +m[1], y1: +m[2], x2: +m[3], y2: +m[4] } : { _raw: c };
+        break;
+      }
+      case 'tap': {
+        const m = c.match(/^click\((.*)\)$/);
+        config.fields = { selector: m ? m[1] : '' };
+        break;
+      }
+      case 'type': {
+        const m = c.match(/send_keys\("([^"]*)"\)/);
+        config.fields = { text: m ? m[1] : '' };
+        break;
+      }
+      case 'key': {
+        const m = c.match(/press\("([^"]*)"\)/);
+        config.fields = { key: m ? m[1] : '' };
+        break;
+      }
+      case 'launchapp': {
+        const m = c.match(/start_app\("([^"]*)"\)/);
+        config.fields = { package: m ? m[1] : '' };
+        break;
+      }
+      case 'wait': {
+        const m = c.match(/sleep\(([\d.]+)\)/);
+        config.fields = { seconds: m ? +m[1] : 1 };
+        break;
+      }
+      default:
+        config.fields = { _raw: c };
+    }
+    return config;
+  },
+
+  updateStepField(field, value) {
+    const step = this.selectedStep;
+    if (!step) return;
+    const type = this.computedStepType();
+    const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+    if (type === 'imglocate') {
+      this._updateImgField(field, value);
+      return;
+    }
+
+    switch (type) {
+      case 'swipe': {
+        const m = step.code.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/);
+        if (!m) return;
+        const f = { x1: m[1], y1: m[2], x2: m[3], y2: m[4], [field]: value };
+        step.code = `swipe((${+f.x1}, ${+f.y1}), (${+f.x2}, ${+f.y2}))`;
+        break;
+      }
+      case 'tap':
+        step.code = `click(${value})`;
+        break;
+      case 'type':
+        step.code = `device.driver.send_keys("${esc(value)}")`;
+        break;
+      case 'key':
+        step.code = `device.driver.press("${esc(value)}")`;
+        break;
+      case 'launchapp':
+        step.code = `start_app("${esc(value)}")`;
+        break;
+      case 'wait':
+        step.code = `time.sleep(${value})`;
+        break;
+      case 'code':
+        step.code = value;
+        break;
+    }
+    this._dirtyStep();
+  },
+
+  // ── Image step helpers ──
+
+  _imgFields() {
+    const s = this.selectedStep;
+    if (!s) return {};
+    return {
+      action: s.action || 'click',
+      grid_h: s.grid_h || 1,
+      grid_v: s.grid_v || 1,
+      click_col: s.click_col || 0,
+      click_row: s.click_row || 0,
+      timeout: s.timeout || 10,
+      threshold: s.threshold ?? '',
+      image: s.image || null,
+    };
+  },
+
+  _updateImgField(field, value) {
+    const step = this.selectedStep;
+    if (!step) return;
+    step[field] = value;
+    if (['action','grid_h','grid_v','click_col','click_row','timeout','threshold'].includes(field)) {
+      step.code = this.generateImgCode(step);
+    }
+    this._dirtyStep();
+    if (['grid_h','grid_v','click_col','click_row'].includes(field)) {
+      this.$nextTick(() => this.renderImgConfigGrid());
+    }
+  },
+
+  generateImgCode(step) {
+    const imgPath = step.image_filename || 'template.png';
+    const t = step.threshold ? `, threshold=${step.threshold}` : '';
+    if (step.action === 'click') {
+      if (step.grid_h === 1 && step.grid_v === 1) return `click(image="${imgPath}"${t})`;
+      return `click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v})${t})`;
+    } else if (step.action === 'wait_show') {
+      return `wait(image="${imgPath}", timeout=${step.timeout}${t})`;
+    } else if (step.action === 'wait_hide') {
+      return `wait(image="${imgPath}", timeout=${step.timeout}, reverse=True${t})`;
+    }
+    return `click(image="${imgPath}"${t})`;
+  },
+
+  renderImgConfigGrid() {
+    const canvas = this.$el.querySelector('#imgConfigCanvas');
+    const img = this.$el.querySelector('#imgConfigPreview');
+    if (!canvas || !img || !img.naturalWidth || !img.naturalHeight) return;
+
+    const imgRect = img.getBoundingClientRect();
+    const wrapRect = img.parentElement.getBoundingClientRect();
+    const offX = imgRect.left - wrapRect.left;
+    const offY = imgRect.top - wrapRect.top;
+    const rW = imgRect.width, rH = imgRect.height;
+
+    canvas.style.left = offX + 'px';
+    canvas.style.top = offY + 'px';
+    canvas.style.width = rW + 'px';
+    canvas.style.height = rH + 'px';
+    canvas.width = rW * (window.devicePixelRatio || 1);
+    canvas.height = rH * (window.devicePixelRatio || 1);
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, rW, rH);
+
+    const step = this.selectedStep;
+    if (!step || step._type !== 'imglocate') return;
+    const cols = step.grid_h, rows = step.grid_v;
+    const cw = rW / cols, ch = rH / rows;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
+    for (let c = 1; c < cols; c++) { ctx.beginPath(); ctx.moveTo(c * cw, 0); ctx.lineTo(c * cw, rH); ctx.stroke(); }
+    for (let r = 1; r < rows; r++) { ctx.beginPath(); ctx.moveTo(0, r * ch); ctx.lineTo(rW, r * ch); ctx.stroke(); }
+
+    if (step.action === 'click') {
+      ctx.fillStyle = 'rgba(54,121,227,0.4)';
+      ctx.fillRect(step.click_col * cw, step.click_row * ch, cw, ch);
+      ctx.strokeStyle = '#3679E3';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(step.click_col * cw, step.click_row * ch, cw, ch);
+      const cx = step.click_col * cw + cw / 2, cy = step.click_row * ch + ch / 2;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+    }
+  },
+
+  onGridCellClick(event) {
+    const step = this.selectedStep;
+    if (!step || step._type !== 'imglocate' || step.action !== 'click') return;
+    const canvas = this.$el.querySelector('#imgConfigCanvas');
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const cols = step.grid_h, rows = step.grid_v;
+    step.click_col = Math.min(Math.max(Math.floor(x / (rect.width / cols)), 0), cols - 1);
+    step.click_row = Math.min(Math.max(Math.floor(y / (rect.height / rows)), 0), rows - 1);
+    step.code = this.generateImgCode(step);
+    this._dirtyStep();
+    this.renderImgConfigGrid();
+  },
+
+  _dirtyStep() {
+    const i = this.selectedStepIndex;
+    if (i >= 0) this.$set(this.steps, i, { ...this.steps[i] });
+    this.ensureFile();
+  },
+};
