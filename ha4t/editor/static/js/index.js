@@ -865,25 +865,16 @@ new Vue({
       // Guard: image not loaded yet
       if (!img.naturalWidth || !img.naturalHeight) return;
 
-      // Calculate actual rendered image dimensions (object-fit: contain)
-      const containerW = img.parentElement.clientWidth;
-      const containerH = img.parentElement.clientHeight;
-      const imgRatio = img.naturalWidth / img.naturalHeight;
-      const containerRatio = containerW / containerH;
-      let renderW, renderH, offsetX, offsetY;
-      if (imgRatio > containerRatio) {
-        renderW = containerW;
-        renderH = containerW / imgRatio;
-        offsetX = 0;
-        offsetY = (containerH - renderH) / 2;
-      } else {
-        renderH = containerH;
-        renderW = containerH * imgRatio;
-        offsetX = (containerW - renderW) / 2;
-        offsetY = 0;
-      }
+      // Use getBoundingClientRect to get ACTUAL rendered position/size of the img
+      // (accounts for object-fit: contain, flex centering, borders, etc.)
+      const imgRect = img.getBoundingClientRect();
+      const wrapRect = img.parentElement.getBoundingClientRect();
+      const offsetX = imgRect.left - wrapRect.left;
+      const offsetY = imgRect.top - wrapRect.top;
+      const renderW = imgRect.width;
+      const renderH = imgRect.height;
 
-      // Position and size canvas to match actual rendered image
+      // Position and size canvas to exactly match the img element
       canvas.style.left = offsetX + 'px';
       canvas.style.top = offsetY + 'px';
       canvas.style.width = renderW + 'px';
