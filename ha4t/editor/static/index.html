@@ -67,10 +67,12 @@
                         <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="音量+">🔊</el-button>
                         <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="音量-">🔉</el-button>
                     </el-button-group>
-                    <el-button size="mini" @click="enterCaptureMode" :disabled="!isConnected || captureMode" title="添加图片定位步骤">🎯</el-button>
+                    <el-button size="mini" @click="enterCaptureMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="添加图片定位步骤">🎯</el-button>
+                    <el-button size="mini" @click="enterSwipeRecordMode" :disabled="!isConnected || captureMode || swipeRecordMode" title="录制滑动手势">👆</el-button>
                     <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="刷新">刷新</el-button>
                 </div>
                 <div v-if="captureMode" class="capture-indicator">拖拽选择目标区域 (按 Esc 取消)</div>
+                <div v-if="swipeRecordMode" class="capture-indicator swipe-indicator">点击截图记录滑动起点和终点 (按 Esc 取消)</div>
                 <canvas id="screenshotCanvas"></canvas>
                 <canvas id="hierarchyCanvas"></canvas>
             </div>

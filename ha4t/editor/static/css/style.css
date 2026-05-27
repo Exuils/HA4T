@@ -437,6 +437,10 @@ code {
     pointer-events: none;
 }
 
+.swipe-indicator {
+    background: rgba(255, 68, 68, 0.9);
+}
+
 /* ── Image Step Card ── */
 .step-img {
     padding: 4px 10px;

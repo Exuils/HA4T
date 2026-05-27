@@ -4,7 +4,7 @@ import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
   { action: 'tap', desc: '点击元素 (uiautomator2)' },
-  { action: 'drag', desc: '拖拽手势' },
+  { action: 'swipe', desc: '录制滑动手势 (比例坐标)' },
   { action: 'type', desc: '输入文本' },
   { action: 'key', desc: '系统按键' },
   { action: 'launchapp', desc: '启动应用' },
@@ -83,6 +83,10 @@ new Vue({
       imgConfigStep: null,
       imgConfigIndex: -1,
       thresholdInput: '',
+
+      // Swipe record state
+      swipeRecordMode: false,
+      swipePoints: [],
 
       // New image step data
       newImageStep: null
@@ -313,6 +317,38 @@ new Vue({
         ctx.lineWidth = 2;
         ctx.strokeRect(x * scale + offsetX, y * scale + offsetY, width * scale, height * scale);
       }
+
+      // Draw swipe record points
+      if (this.swipeRecordMode && this.swipePoints.length) {
+        ctx.setLineDash([]);
+        const [w, h] = [canvas.clientWidth, canvas.clientHeight];
+        this.swipePoints.forEach((p, i) => {
+          const px = p.x * w;
+          const py = p.y * h;
+          ctx.beginPath();
+          ctx.arc(px, py, 8, 0, 2 * Math.PI);
+          ctx.fillStyle = i === 0 ? '#00ff00' : '#ff4444';
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Label
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(i === 0 ? '起点' : '终点', px + 12, py - 12);
+        });
+        if (this.swipePoints.length === 2) {
+          const p1 = this.swipePoints[0];
+          const p2 = this.swipePoints[1];
+          ctx.beginPath();
+          ctx.moveTo(p1.x * w, p1.y * h);
+          ctx.lineTo(p2.x * w, p2.y * h);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+        }
+      }
     },
     async fetchXpathLite(nodeId) {
       try {
@@ -422,7 +458,7 @@ new Vue({
       }
     },
     onMouseMove(event) {
-      if (this.captureMode) return;
+      if (this.captureMode || this.swipeRecordMode) return;
       const canvas = this.$el.querySelector('#hierarchyCanvas');
       const rect = canvas.getBoundingClientRect();
       const mouseX = event.clientX - rect.left;
@@ -449,6 +485,18 @@ new Vue({
       const percentY = (mouseY / canvas.height);
 
       this.mouseClickCoordinatesPercent = `(${percentX.toFixed(2)}, ${percentY.toFixed(2)})`;
+
+      // Swipe recording: record ratio coordinates on canvas
+      if (this.swipeRecordMode) {
+        this.swipePoints.push({ x: percentX, y: percentY, px: mouseX, py: mouseY });
+        this.renderHierarchy();
+        if (this.swipePoints.length === 1) {
+          this.$message({ message: '已记录起点，请点击终点', type: 'info', duration: 2000 });
+        } else if (this.swipePoints.length === 2) {
+          this.finishSwipeRecord();
+        }
+        return;
+      }
 
       const selectedNode = this.findSmallestNode(this.jsonHierarchy, mouseX, mouseY, scale, offsetX, offsetY);
       if (selectedNode !== this.selectedNode) {
@@ -808,6 +856,10 @@ new Vue({
         this.enterCaptureMode();
         return;
       }
+      if (action === 'swipe') {
+        this.enterSwipeRecordMode();
+        return;
+      }
       const code = this.stepToCode(action, value);
       const idx = this.steps.length;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
@@ -825,8 +877,29 @@ new Vue({
       this.captureStart = null;
       this.captureRect = null;
     },
+    enterSwipeRecordMode() {
+      this.swipeRecordMode = true;
+      this.swipePoints = [];
+      this.$message({ message: '请点击滑动起点', type: 'info', duration: 3000 });
+    },
+    exitSwipeRecordMode() {
+      this.swipeRecordMode = false;
+      this.swipePoints = [];
+      this.renderHierarchy();
+    },
+    finishSwipeRecord() {
+      const [p1, p2] = this.swipePoints;
+      const code = `swipe((${p1.x.toFixed(3)}, ${p1.y.toFixed(3)}), (${p2.x.toFixed(3)}, ${p2.y.toFixed(3)}))`;
+      const idx = this.steps.length;
+      this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+      this.ensureFile();
+      this.$message({ message: `已添加滑动: ${code}`, type: 'success' });
+      this.exitSwipeRecordMode();
+      if (this.autoRun) this.runSingleStep(idx);
+    },
     stepToCode(action, value) {
       if (action === 'imglocate') return '# 图片定位 - 等待配置';
+      if (action === 'swipe') return '# 滑动 - 请在截图上录制起点和终点';
       const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
       const m = {
         tap: `click(text="${esc(value)}")`,
@@ -1142,6 +1215,7 @@ new Vue({
         this.slashVisible = false;
         if (this.cliPrefix) { this.cliPrefix = ''; this.cliText = ''; }
         if (this.captureMode) { this.exitCaptureMode(); }
+        if (this.swipeRecordMode) { this.exitSwipeRecordMode(); this.$message({ message: '已取消滑动录制', type: 'info' }); }
       }
     },
     onCliInput() {
@@ -1213,6 +1287,13 @@ new Vue({
         this.cliPrefix = '';
         return;
       }
+      if (item.action === 'swipe') {
+        this.addStep('swipe', '');
+        this.slashVisible = false;
+        this.cliText = '';
+        this.cliPrefix = '';
+        return;
+      }
       this.cliPrefix = item.action;
       this.cliText = '';
       if (item.action === 'launchapp') {
@@ -1279,7 +1360,7 @@ new Vue({
     },
 
     onMouseDblClick() {
-      if (this.captureMode) return;
+      if (this.captureMode || this.swipeRecordMode) return;
       if (this.selectedNode && this.rightTab === 'editor') {
         this.insertStepFromElement();
       }
