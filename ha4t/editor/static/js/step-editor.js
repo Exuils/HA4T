@@ -247,10 +247,10 @@ export const StepEditorMethods = {
     const m = {
       tap: `click(text="${esc(value)}")`,
       drag: `swipe((300, 300), (300, 700))`,
-      type: `device.driver.send_keys("${esc(value)}")`,
-      key: `device.driver.press("${esc(value)}")`,
-      launchapp: `start_app("${esc(value)}")`,
-      wait: `time.sleep(${value})`,
+      type: `type("${esc(value)}")`,
+      key: `key("${esc(value)}")`,
+      launchapp: `launchapp("${esc(value)}")`,
+      wait: `sleep(${value})`,
     };
     return m[action] || esc(value);
   },

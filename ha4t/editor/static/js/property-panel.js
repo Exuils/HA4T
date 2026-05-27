@@ -6,10 +6,10 @@ export const PropertyPanelMethods = {
     if (s._type === 'imglocate') return 'imglocate';
     if (/^swipe\(/.test(c)) return 'swipe';
     if (/^click\(/.test(c)) return 'tap';
-    if (c.includes('send_keys(')) return 'type';
-    if (c.includes('press(')) return 'key';
-    if (c.startsWith('start_app(')) return 'launchapp';
-    if (c.startsWith('time.sleep(')) return 'wait';
+    if (c.startsWith('type(')) return 'type';
+    if (c.startsWith('key(')) return 'key';
+    if (c.startsWith('launchapp(')) return 'launchapp';
+    if (c.startsWith('sleep(')) return 'wait';
     return 'code';
   },
 
@@ -33,22 +33,22 @@ export const PropertyPanelMethods = {
         break;
       }
       case 'type': {
-        const m = c.match(/send_keys\("([^"]*)"\)/);
+        const m = c.match(/(?:send_keys|type)\("([^"]*)"\)/);
         config.fields = { text: m ? m[1] : '' };
         break;
       }
       case 'key': {
-        const m = c.match(/press\("([^"]*)"\)/);
+        const m = c.match(/(?:press|key)\("([^"]*)"\)/);
         config.fields = { key: m ? m[1] : '' };
         break;
       }
       case 'launchapp': {
-        const m = c.match(/start_app\("([^"]*)"\)/);
+        const m = c.match(/(?:start_app|launchapp)\("([^"]*)"\)/);
         config.fields = { package: m ? m[1] : '' };
         break;
       }
       case 'wait': {
-        const m = c.match(/sleep\(([\d.]+)\)/);
+        const m = c.match(/(?:time\.)?sleep\(([\d.]+)\)/);
         config.fields = { seconds: m ? +m[1] : 1 };
         break;
       }
@@ -81,16 +81,16 @@ export const PropertyPanelMethods = {
         step.code = `click(${value})`;
         break;
       case 'type':
-        step.code = `device.driver.send_keys("${esc(value)}")`;
+        step.code = `type("${esc(value)}")`;
         break;
       case 'key':
-        step.code = `device.driver.press("${esc(value)}")`;
+        step.code = `key("${esc(value)}")`;
         break;
       case 'launchapp':
-        step.code = `start_app("${esc(value)}")`;
+        step.code = `launchapp("${esc(value)}")`;
         break;
       case 'wait':
-        step.code = `time.sleep(${value})`;
+        step.code = `sleep(${value})`;
         break;
       case 'code':
         step.code = value;
