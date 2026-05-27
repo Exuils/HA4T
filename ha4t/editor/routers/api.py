@@ -25,32 +25,21 @@ from ha4t.editor._models import (    ApiResponse, XPathLiteRequest,
 )
 from pydantic import BaseModel
 from ha4t.editor.parser.xpath_lite import XPathLiteGenerator
+from ha4t.editor._config import get_tasks_dir, get_images_dir, EditorConfig
 
 
 router = APIRouter()
 
-TASKS_DIR = Path(os.environ.get(
-    "HA4T_TASKS_DIR",
-    Path.home() / "Documents" / "HA4T" / "tasks" if os.name == "nt"
-    else Path.home() / "ha4t" / "tasks"
-))
-TASKS_DIR.mkdir(parents=True, exist_ok=True)
+TASKS_DIR = get_tasks_dir()
+IMAGES_DIR = get_images_dir()
 
 
-@router.post("/tasks/open-folder", response_model=ApiResponse)
-def open_tasks_folder():
-    import subprocess, sys
-    try:
-        path = str(TASKS_DIR)
-        if sys.platform == "win32":
-            os.startfile(path)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-        return ApiResponse.doSuccess(path)
-    except Exception as e:
-        return ApiResponse.doError(str(e))
+def _refresh_paths():
+    """Re-read config so updated paths take effect without restart."""
+    global TASKS_DIR, IMAGES_DIR
+    TASKS_DIR = get_tasks_dir()
+    IMAGES_DIR = get_images_dir()
+
 
 _STEP_MARKER = "# --step--"
 
@@ -139,37 +128,28 @@ def press_key(platform: str, serial: str, key: str):
 import json as _json
 
 def _parse_py_steps(content: str) -> list:
-    """Parse # --step-- markers, return list of {code, meta}"""
+    """Parse # --step-- markers, return list of {code}"""
     lines = content.split('\n')
     steps = []
     buf = []
-    meta = None
     in_step = False
     for line in lines:
         stripped = line.strip()
         if stripped == _STEP_MARKER:
             if in_step and buf:
-                steps.append({'code': '\n'.join(buf).strip(), 'meta': meta})
+                steps.append('\n'.join(buf).strip())
                 buf = []
-                meta = None
             in_step = True
             continue
-        if in_step:
-            if stripped.startswith('# @imglocate'):
-                try:
-                    meta = _json.loads(stripped[len('# @imglocate'):].strip())
-                except Exception:
-                    pass
-                continue
-            if stripped and not stripped.startswith('#'):
-                buf.append(line)
+        if in_step and stripped and not stripped.startswith('#'):
+            buf.append(line)
     if in_step and buf:
-        steps.append({'code': '\n'.join(buf).strip(), 'meta': meta})
+        steps.append('\n'.join(buf).strip())
     return steps
 
 
 def _extract_meta(content: str) -> dict:
-    name = desc = ''
+    name = desc = project_id = ''
     platform = 'android'
     for line in content.split('\n'):
         if line.startswith('# name:'):
@@ -178,10 +158,12 @@ def _extract_meta(content: str) -> dict:
             desc = line.split(':', 1)[1].strip()
         elif line.startswith('# platform:'):
             platform = line.split(':', 1)[1].strip()
-    return {'name': name, 'desc': desc, 'platform': platform}
+        elif line.startswith('# project_id:'):
+            project_id = line.split(':', 1)[1].strip()
+    return {'name': name, 'desc': desc, 'platform': platform, 'project_id': project_id}
 
 
-def _generate_py(name, desc, platform, steps, extra_lines=None):
+def _generate_py(name, desc, platform, step_codes, extra_lines=None):
     lines = ['# name: ' + name]
     if desc:
         lines.append('# desc: ' + desc)
@@ -194,15 +176,83 @@ def _generate_py(name, desc, platform, steps, extra_lines=None):
     lines.append('')
     if extra_lines:
         lines.extend(extra_lines)
-    for step in steps:
+    for code in step_codes:
         lines.append(_STEP_MARKER)
-        meta = step.get('meta')
-        if meta and meta.get('_type') == 'imglocate':
-            lines.append('# @imglocate ' + _json.dumps(meta, ensure_ascii=False, separators=(',', ':')))
-        lines.append(step['code'])
+        lines.append(code)
     lines.append('')
     return '\n'.join(lines)
 
+
+# ── Config (must be before /tasks/{filename:path}) ─────────────────
+
+class ConfigUpdateRequest(BaseModel):
+    key: str
+    value: str
+
+@router.get("/config", response_model=ApiResponse)
+def get_config():
+    cfg = EditorConfig()
+    return ApiResponse.doSuccess({
+        "tasks_dir": cfg.get("tasks_dir"),
+        "images_dir": cfg.get("images_dir"),
+        "screenshots_dir": cfg.get("screenshots_dir"),
+    })
+
+@router.post("/config", response_model=ApiResponse)
+def set_config(req: ConfigUpdateRequest):
+    cfg = EditorConfig()
+    cfg.set(req.key, req.value)
+    _refresh_paths()
+    return ApiResponse.doSuccess({"key": req.key, "value": req.value})
+
+
+@router.post("/tasks/open-folder", response_model=ApiResponse)
+def open_tasks_folder():
+    try:
+        path = str(TASKS_DIR)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return ApiResponse.doSuccess(path)
+    except Exception as e:
+        return ApiResponse.doError(str(e))
+
+
+# ── Images (must be before /tasks/{filename:path}) ─────────────────
+
+@router.get("/images/{imgname}", response_model=ApiResponse)
+def get_image(imgname: str):
+    img_path = IMAGES_DIR / imgname
+    if not img_path.exists():
+        return ApiResponse.doError(f"Image not found: {imgname}")
+    data = base64.b64encode(img_path.read_bytes()).decode("utf-8")
+    return ApiResponse.doSuccess({"filename": imgname, "data": data})
+
+
+class ImageUploadRequest(BaseModel):
+    data: str
+
+@router.post("/images/{imgname}", response_model=ApiResponse)
+def save_image(imgname: str, req: ImageUploadRequest):
+    data = req.data or ""
+    print(f"[save_image] received imgname={imgname}, data_len={len(data)}, starts_with_data={data.startswith('data:image')}")
+    if data.startswith("data:image"):
+        data = data.split(",", 1)[1]
+    img_path = IMAGES_DIR / imgname
+    try:
+        decoded = base64.b64decode(data)
+        img_path.write_bytes(decoded)
+        print(f"[save_image] saved {imgname} ({len(decoded)} bytes) to {img_path}")
+        return ApiResponse.doSuccess({"filename": imgname, "saved": True})
+    except Exception as e:
+        print(f"[save_image] error: {e}")
+        return ApiResponse.doError(str(e))
+
+
+# ── Tasks ──────────────────────────────────────────────────────────
 
 @router.get("/tasks", response_model=ApiResponse)
 def list_tasks():
@@ -237,40 +287,50 @@ def save_task(filename: str, req: TaskSaveRequest):
     return ApiResponse.doSuccess({"filename": filename, "saved": True})
 
 
-@router.get("/tasks/{filename:path}/images", response_model=ApiResponse)
-def list_task_images(filename: str):
-    stem = Path(filename).stem
-    img_dir = TASKS_DIR / f"{stem}_imgs"
-    if not img_dir.exists():
-        return ApiResponse.doSuccess([])
-    files = [p.name for p in sorted(img_dir.glob("*.png"))]
-    return ApiResponse.doSuccess(files)
+@router.get("/tasks/{filename:path}/project-id", response_model=ApiResponse)
+def get_project_id(filename: str):
+    path = TASKS_DIR / filename
+    if not path.exists():
+        return ApiResponse.doSuccess("")
+    content = path.read_text(encoding="utf-8")
+    meta = _extract_meta(content)
+    return ApiResponse.doSuccess(meta.get('project_id', ''))
 
 
-@router.get("/tasks/{filename:path}/images/{imgname}", response_model=ApiResponse)
-def get_task_image(filename: str, imgname: str):
-    stem = Path(filename).stem
-    img_path = TASKS_DIR / f"{stem}_imgs" / imgname
-    if not img_path.exists():
-        return ApiResponse.doError(f"Image not found: {imgname}")
-    data = base64.b64encode(img_path.read_bytes()).decode("utf-8")
-    return ApiResponse.doSuccess({"filename": imgname, "data": data})
+@router.post("/tasks/{filename:path}/cleanup-images", response_model=ApiResponse)
+def cleanup_task_images(filename: str):
+    path = TASKS_DIR / filename
+    if not path.exists():
+        return ApiResponse.doSuccess({"removed": 0})
+    content = path.read_text(encoding="utf-8")
+    meta = _extract_meta(content)
+    project_id = meta.get('project_id', '')
+    if not project_id:
+        return ApiResponse.doSuccess({"removed": 0})
 
+    # Find all referenced image filenames in the content
+    referenced = set()
+    for line in content.split('\n'):
+        # Match image="..." or image='...'
+        m = re.search(r'image=["\']([^"\']+)["\']', line)
+        if m:
+            referenced.add(m.group(1))
+        # Also match image_filename in metadata
+        m2 = re.search(r'"image_filename":"([^"]+)"', line)
+        if m2:
+            referenced.add(m2.group(1))
 
-class ImageUploadRequest(BaseModel):
-    data: str
+    removed = 0
+    prefix = f"{project_id}_"
+    for img_path in IMAGES_DIR.glob(f"{prefix}*.png"):
+        if img_path.name not in referenced:
+            try:
+                img_path.unlink()
+                removed += 1
+            except Exception:
+                pass
 
-@router.post("/tasks/{filename:path}/images/{imgname}", response_model=ApiResponse)
-def save_task_image(filename: str, imgname: str, req: ImageUploadRequest):
-    stem = Path(filename).stem
-    img_dir = TASKS_DIR / f"{stem}_imgs"
-    img_dir.mkdir(parents=True, exist_ok=True)
-    img_path = img_dir / imgname
-    data = req.data or ""
-    if data.startswith("data:image"):
-        data = data.split(",", 1)[1]
-    img_path.write_bytes(base64.b64decode(data))
-    return ApiResponse.doSuccess({"filename": imgname, "saved": True})
+    return ApiResponse.doSuccess({"removed": removed, "referenced": len(referenced)})
 
 
 @router.websocket("/ws/run")
@@ -295,14 +355,24 @@ async def ws_run_task(ws: WebSocket):
     tmppy.write_text(content, encoding="utf-8")
 
     # Copy referenced images to temp dir so the script can find them
-    stem = Path(filename).stem
-    img_dir = TASKS_DIR / f"{stem}_imgs"
-    if img_dir.exists():
-        for img in img_dir.glob("*.png"):
-            try:
-                shutil.copy(img, tmpdir / img.name)
-            except Exception:
-                pass
+    meta = _extract_meta(content)
+    project_id = meta.get('project_id', '')
+    await ws.send_json({"type": "log", "text": f"[runner] project_id={project_id}, images_dir={IMAGES_DIR}"})
+    copied = 0
+    for line in content.split('\n'):
+        m = re.search(r'image=["\']([^"\']+)["\']', line)
+        if m:
+            img_name = m.group(1)
+            img_path = IMAGES_DIR / img_name
+            await ws.send_json({"type": "log", "text": f"[runner] checking image: {img_name} -> exists={img_path.exists()}"})
+            if img_path.exists():
+                try:
+                    shutil.copy(img_path, tmpdir / img_name)
+                    copied += 1
+                    await ws.send_json({"type": "log", "text": f"[runner] copied {img_name} to tmpdir"})
+                except Exception as e:
+                    await ws.send_json({"type": "log", "text": f"[runner] copy failed: {e}"})
+    await ws.send_json({"type": "log", "text": f"[runner] total copied: {copied}"})
 
     step_codes = _parse_py_steps(content)
     total = len(step_codes)
@@ -310,7 +380,7 @@ async def ws_run_task(ws: WebSocket):
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", str(tmppy)],
-            cwd=Path(__file__).parent.parent.parent.parent,
+            cwd=str(tmpdir),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

@@ -1,5 +1,5 @@
 ﻿import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './utils.js';
-import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages, saveTaskImage, getTaskImage } from './api.js';
+import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages, getProjectId, getImage, saveImage, cleanupImages } from './api.js';
 import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
@@ -57,6 +57,7 @@ new Vue({
       taskName: '',
       taskDesc: '',
       taskPlatform: 'android',
+      projectId: '',
       steps: [],
       autoRun: getFromLocalStorage('autoRun', false),
       selectedStepIndex: -1,
@@ -81,6 +82,7 @@ new Vue({
       imgConfigVisible: false,
       imgConfigStep: null,
       imgConfigIndex: -1,
+      thresholdInput: '',
 
       // New image step data
       newImageStep: null
@@ -126,7 +128,8 @@ new Vue({
       },
       imgConfigVisible(val) {
         if (val) {
-          this.$nextTick(() => this.renderImgConfigGrid());
+          // Retry a few times since image may load async
+          [0, 100, 300, 600].forEach(d => setTimeout(() => this.renderImgConfigGrid(), d));
         }
       }
     },
@@ -263,6 +266,19 @@ new Vue({
       const canvas = this.$el.querySelector('#hierarchyCanvas');
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // In capture mode, don't draw hierarchy boxes so they don't interfere with selection
+      if (this.captureMode) {
+        if (this.captureRect && this.captureRect.w > 0) {
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
+          ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
+          ctx.fillRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
+        }
+        return;
+      }
 
       const { scale, offsetX, offsetY } = this.screenshotTransform;
       ctx.setLineDash([2, 6]);
@@ -457,19 +473,37 @@ new Vue({
         y: event.clientY - rect.top
       };
     },
+    getScreenshotBoundsOnCanvas() {
+      const canvas = this.$el.querySelector('#hierarchyCanvas');
+      const { offsetX, offsetY } = this.screenshotTransform;
+      const w = canvas.clientWidth - 2 * offsetX;
+      const h = canvas.clientHeight - 2 * offsetY;
+      return { left: offsetX, top: offsetY, right: offsetX + w, bottom: offsetY + h, width: w, height: h };
+    },
+    clampCaptureRect(raw) {
+      const b = this.getScreenshotBoundsOnCanvas();
+      let x = Math.max(raw.x, b.left);
+      let y = Math.max(raw.y, b.top);
+      let x2 = Math.min(raw.x + raw.w, b.right);
+      let y2 = Math.min(raw.y + raw.h, b.bottom);
+      let w = Math.max(0, x2 - x);
+      let h = Math.max(0, y2 - y);
+      return { x, y, w, h };
+    },
     onCaptureMouseMove(event) {
       if (!this.captureMode || !this.captureStart) return;
       const canvas = this.$el.querySelector('#hierarchyCanvas');
       const rect = canvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      this.captureRect = {
+      const raw = {
         x: Math.min(this.captureStart.x, x),
         y: Math.min(this.captureStart.y, y),
         w: Math.abs(x - this.captureStart.x),
         h: Math.abs(y - this.captureStart.y)
       };
-      this.renderCaptureRect();
+      this.captureRect = this.clampCaptureRect(raw);
+      this.renderHierarchy();
     },
     async onCaptureMouseUp(event) {
       if (!this.captureMode || !this.captureStart) return;
@@ -477,15 +511,16 @@ new Vue({
       const rect = canvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      const captureRect = {
+      const raw = {
         x: Math.min(this.captureStart.x, x),
         y: Math.min(this.captureStart.y, y),
         w: Math.abs(x - this.captureStart.x),
         h: Math.abs(y - this.captureStart.y)
       };
+      let captureRect = this.clampCaptureRect(raw);
       this.captureStart = null;
       this.captureRect = null;
-      this.renderCaptureRect();
+      this.renderHierarchy();
       if (captureRect.w < 10 || captureRect.h < 10) {
         this.$message({ message: '选择区域太小，已取消', type: 'warning' });
         this.exitCaptureMode();
@@ -493,20 +528,6 @@ new Vue({
       }
       await this.createImageStep(captureRect);
       this.exitCaptureMode();
-    },
-    renderCaptureRect() {
-      const canvas = this.$el.querySelector('#hierarchyCanvas');
-      const ctx = canvas.getContext('2d');
-      // Redraw hierarchy first
-      this.renderHierarchy();
-      if (this.captureRect && this.captureRect.w > 0) {
-        ctx.setLineDash([]);
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
-        ctx.fillRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
-      }
     },
     async createImageStep(rect) {
       const { scale, offsetX, offsetY } = this.screenshotTransform;
@@ -521,6 +542,10 @@ new Vue({
         this.$message({ message: '无截图缓存，请刷新后重试', type: 'warning' });
         return;
       }
+      // Ensure project_id exists
+      if (!this.projectId) {
+        this.projectId = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+      }
       // Create image and crop
       const img = new Image();
       img.src = `data:image/png;base64,${base64Data}`;
@@ -531,8 +556,8 @@ new Vue({
       const ctx = cropCanvas.getContext('2d');
       ctx.drawImage(img, imgX, imgY, imgW, imgH, 0, 0, imgW, imgH);
       const croppedBase64 = cropCanvas.toDataURL('image/png');
-      // Generate filename
-      const imgName = `step_${Date.now()}.png`;
+      // Generate filename with project_id prefix
+      const imgName = `${this.projectId}_step_${Date.now()}.png`;
       const stepIdx = this.steps.length;
       const step = {
         _type: 'imglocate',
@@ -552,14 +577,13 @@ new Vue({
       };
       this.steps.push(step);
       this.selectedStepIndex = stepIdx;
-      // Save image to server
+      // Save image to centralized server dir
       this.ensureFile();
-      if (this.currentYamlFile) {
-        await saveTaskImage(this.currentYamlFile, imgName, croppedBase64)
-          .then(() => { step._imageSaved = true; })
-          .catch(() => {});
-      }
+      await saveImage(imgName, croppedBase64)
+        .then(() => { step._imageSaved = true; })
+        .catch((e) => { console.error('保存图片失败', e); });
       this.$message({ message: `已添加图片定位步骤`, type: 'success' });
+      if (this.autoRun) this.runSingleStep(stepIdx);
     },
     onMouseLeave() {
       if (this.hoveredNode) {
@@ -653,15 +677,25 @@ new Vue({
           this.currentYamlFile = filename;
           this.currentYamlContent = res.data.content;
           this.parseYamlToTask(res.data.content);
-          // Load images for imglocate steps
-          for (const step of this.steps) {
+          // Ensure project_id exists
+          if (!this.projectId) {
+            this.projectId = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+            this.saveCurrentTask();
+          }
+          // Load images for imglocate steps from centralized dir
+          for (let i = 0; i < this.steps.length; i++) {
+            const step = this.steps[i];
             if (step._type === 'imglocate' && step.image_filename) {
               try {
-                const imgRes = await getTaskImage(filename, step.image_filename);
+                const imgRes = await getImage(step.image_filename);
                 if (imgRes.success && imgRes.data && imgRes.data.data) {
-                  step.image = 'data:image/png;base64,' + imgRes.data.data;
+                  this.$set(this.steps, i, { ...step, image: 'data:image/png;base64,' + imgRes.data.data });
+                } else {
+                  console.warn('图片加载失败:', step.image_filename, imgRes.message);
                 }
-              } catch (e) { /* ignore */ }
+              } catch (e) {
+                console.warn('图片加载异常:', step.image_filename, e.message);
+              }
             }
           }
           saveToLocalStorage('currentYamlFile', filename);
@@ -671,10 +705,48 @@ new Vue({
         this.$message({ showClose: true, message: `错误: ${err.message}`, type: 'error' });
       }
     },
+    _parseStepCode(code) {
+      const s = { code, _status: 'pending', _detail: '', _duration: null };
+      // Detect image locate steps from code patterns
+      const imgMatch = code.match(/image=["']([^"']+)["']/);
+      if (!imgMatch) return s;
+      s._type = 'imglocate';
+      s.image_filename = imgMatch[1];
+      if (code.includes('click(image=')) {
+        s.action = 'click';
+        const gridMatch = code.match(/grid=\((\d+)\s*,\s*(\d+)\)/);
+        const splitsMatch = code.match(/splits=\((\d+)\s*,\s*(\d+)\)/);
+        if (gridMatch && splitsMatch) {
+          s.click_col = parseInt(gridMatch[1], 10);
+          s.click_row = parseInt(gridMatch[2], 10);
+          s.grid_h = parseInt(splitsMatch[1], 10);
+          s.grid_v = parseInt(splitsMatch[2], 10);
+        } else {
+          s.click_col = 0;
+          s.click_row = 0;
+          s.grid_h = 1;
+          s.grid_v = 1;
+        }
+      } else if (code.includes('wait(image=')) {
+        if (code.includes('reverse=True')) {
+          s.action = 'wait_hide';
+        } else {
+          s.action = 'wait_show';
+        }
+        s.grid_h = 1;
+        s.grid_v = 1;
+        s.click_col = 0;
+        s.click_row = 0;
+      }
+      const timeoutMatch = code.match(/timeout=(\d+)/);
+      s.timeout = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 10;
+      const thresholdMatch = code.match(/threshold=(0\.\d+)/);
+      s.threshold = thresholdMatch ? parseFloat(thresholdMatch[1]) : null;
+      return s;
+    },
     parseYamlToTask(content) {
       const lines = content.split('\n');
-      let name = '', desc = '', platform = 'android', inStep = false, stepBuf = [];
-      let stepMeta = null;
+      let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [];
       const steps = [];
       const extraLines = [];
       let inExtra = true;
@@ -682,53 +754,42 @@ new Vue({
         if (line.startsWith('# name:')) { name = line.split(':')[1].trim(); continue; }
         if (line.startsWith('# desc:')) { desc = line.split(':')[1].trim(); continue; }
         if (line.startsWith('# platform:')) { platform = line.split(':')[1].trim(); continue; }
+        if (line.startsWith('# project_id:')) { projectId = line.split(':')[1].trim(); continue; }
         if (line.trim() === '# --step--') {
           if (inStep && stepBuf.length) {
-            const s = { code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null };
-            if (stepMeta) { Object.assign(s, stepMeta); s._type = 'imglocate'; }
-            steps.push(s); stepBuf = []; stepMeta = null;
+            steps.push(this._parseStepCode(stepBuf.join('\n')));
+            stepBuf = [];
           }
           inStep = true; inExtra = false;
           continue;
         }
         if (inStep) {
           const t = line.trim();
-          if (t.startsWith('# @imglocate')) {
-            try { stepMeta = JSON.parse(t.slice('# @imglocate'.length).trim()); } catch (e) { stepMeta = null; }
-            continue;
-          }
           if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
             stepBuf.push(line);
           }
         } else if (inExtra && line.trim()) {
-          if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:')) {
+          if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:') && !line.startsWith('# project_id:')) {
             extraLines.push(line);
           }
         }
       }
       if (inStep && stepBuf.length) {
-        const s = { code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null };
-        if (stepMeta) { Object.assign(s, stepMeta); s._type = 'imglocate'; }
-        steps.push(s);
+        steps.push(this._parseStepCode(stepBuf.join('\n')));
       }
-      this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform;
+      this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform; this.projectId = projectId;
       this.steps = steps; this._extraLines = extraLines;
     },
     taskToYaml() {
       let y = `# name: ${this.taskName || '未命名'}\n`;
       if (this.taskDesc) y += `# desc: ${this.taskDesc}\n`;
       y += `# platform: ${this.taskPlatform}\n`;
+      if (this.projectId) y += `# project_id: ${this.projectId}\n`;
       y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
       y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
       if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
       this.steps.forEach(s => {
-        y += '\n# --step--\n';
-        if (s._type === 'imglocate') {
-          const meta = {};
-          ['action','image_filename','grid_h','grid_v','click_col','click_row','timeout'].forEach(k => { if (s[k] !== undefined) meta[k] = s[k]; });
-          y += '# @imglocate ' + JSON.stringify(meta) + '\n';
-        }
-        y += s.code + '\n';
+        y += '\n# --step--\n' + s.code + '\n';
       });
       return y;
     },
@@ -738,6 +799,7 @@ new Vue({
       this.taskName = '';
       this.taskDesc = '';
       this.taskPlatform = 'android';
+      this.projectId = '';
       this.steps = [];
       this.selectedStepIndex = -1;
     },
@@ -747,8 +809,10 @@ new Vue({
         return;
       }
       const code = this.stepToCode(action, value);
+      const idx = this.steps.length;
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
+      if (this.autoRun) this.runSingleStep(idx);
     },
     enterCaptureMode() {
       this.captureMode = true;
@@ -790,37 +854,68 @@ new Vue({
     openImgConfig(i) {
       this.imgConfigIndex = i;
       this.imgConfigStep = JSON.parse(JSON.stringify(this.steps[i]));
+      this.thresholdInput = this.imgConfigStep.threshold ? String(this.imgConfigStep.threshold) : '';
       this.imgConfigVisible = true;
     },
     renderImgConfigGrid() {
       const canvas = this.$refs.imgConfigCanvas;
       const img = this.$refs.imgConfigPreview;
       if (!canvas || !img) return;
-      canvas.width = img.clientWidth;
-      canvas.height = img.clientHeight;
-      canvas.style.width = img.clientWidth + 'px';
-      canvas.style.height = img.clientHeight + 'px';
+
+      // Guard: image not loaded yet
+      if (!img.naturalWidth || !img.naturalHeight) return;
+
+      // Calculate actual rendered image dimensions (object-fit: contain)
+      const containerW = img.parentElement.clientWidth;
+      const containerH = img.parentElement.clientHeight;
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const containerRatio = containerW / containerH;
+      let renderW, renderH, offsetX, offsetY;
+      if (imgRatio > containerRatio) {
+        renderW = containerW;
+        renderH = containerW / imgRatio;
+        offsetX = 0;
+        offsetY = (containerH - renderH) / 2;
+      } else {
+        renderH = containerH;
+        renderW = containerH * imgRatio;
+        offsetX = (containerW - renderW) / 2;
+        offsetY = 0;
+      }
+
+      // Position and size canvas to match actual rendered image
+      canvas.style.left = offsetX + 'px';
+      canvas.style.top = offsetY + 'px';
+      canvas.style.width = renderW + 'px';
+      canvas.style.height = renderH + 'px';
+      canvas.width = renderW * (window.devicePixelRatio || 1);
+      canvas.height = renderH * (window.devicePixelRatio || 1);
+
       const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const dpr = window.devicePixelRatio || 1;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, renderW, renderH);
+
       const step = this.imgConfigStep;
       if (!step) return;
       const cols = step.grid_h;
       const rows = step.grid_v;
-      const cellW = canvas.width / cols;
-      const cellH = canvas.height / rows;
+      const cellW = renderW / cols;
+      const cellH = renderH / rows;
+
       // Draw grid lines
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       ctx.lineWidth = 1;
       for (let c = 1; c < cols; c++) {
         ctx.beginPath();
         ctx.moveTo(c * cellW, 0);
-        ctx.lineTo(c * cellW, canvas.height);
+        ctx.lineTo(c * cellW, renderH);
         ctx.stroke();
       }
       for (let r = 1; r < rows; r++) {
         ctx.beginPath();
         ctx.moveTo(0, r * cellH);
-        ctx.lineTo(canvas.width, r * cellH);
+        ctx.lineTo(renderW, r * cellH);
         ctx.stroke();
       }
       // Highlight selected cell
@@ -851,8 +946,8 @@ new Vue({
       const y = event.clientY - rect.top;
       const cols = this.imgConfigStep.grid_h;
       const rows = this.imgConfigStep.grid_v;
-      const cellW = canvas.width / cols;
-      const cellH = canvas.height / rows;
+      const cellW = rect.width / cols;
+      const cellH = rect.height / rows;
       const col = Math.min(Math.max(Math.floor(x / cellW), 0), cols - 1);
       const row = Math.min(Math.max(Math.floor(y / cellH), 0), rows - 1);
       this.imgConfigStep.click_col = col;
@@ -869,6 +964,8 @@ new Vue({
       step.click_col = this.imgConfigStep.click_col;
       step.click_row = this.imgConfigStep.click_row;
       step.timeout = this.imgConfigStep.timeout;
+      const t = parseFloat(this.thresholdInput);
+      step.threshold = (!isNaN(t) && t > 0 && t <= 1) ? t : null;
       // Regenerate code
       step.code = this.generateImgCode(step);
       this.$set(this.steps, this.imgConfigIndex, { ...step });
@@ -877,17 +974,18 @@ new Vue({
     },
     generateImgCode(step) {
       const imgPath = step.image_filename || 'template.png';
+      const thresholdParam = step.threshold ? `, threshold=${step.threshold}` : '';
       if (step.action === 'click') {
         if (step.grid_h === 1 && step.grid_v === 1) {
-          return `click(image="${imgPath}")`;
+          return `click(image="${imgPath}"${thresholdParam})`;
         }
-        return `click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v}))`;
+        return `click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v})${thresholdParam})`;
       } else if (step.action === 'wait_show') {
-        return `wait(image="${imgPath}", timeout=${step.timeout})`;
+        return `wait(image="${imgPath}", timeout=${step.timeout}${thresholdParam})`;
       } else if (step.action === 'wait_hide') {
-        return `wait(image="${imgPath}", timeout=${step.timeout}, reverse=True)`;
+        return `wait(image="${imgPath}", timeout=${step.timeout}, reverse=True${thresholdParam})`;
       }
-      return `click(image="${imgPath}")`;
+      return `click(image="${imgPath}"${thresholdParam})`;
     },
     stepIcon(status) {
       status = status || 'pending';
@@ -981,14 +1079,7 @@ new Vue({
       let y = `# name: ${this.taskName}\n# platform: ${this.taskPlatform}\n`;
       y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
       y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
-      const s = this.steps[i];
-      y += '# --step--\n';
-      if (s._type === 'imglocate') {
-        const meta = {};
-        ['action','image_filename','grid_h','grid_v','click_col','click_row','timeout'].forEach(k => { if (s[k] !== undefined) meta[k] = s[k]; });
-        y += '# @imglocate ' + JSON.stringify(meta) + '\n';
-      }
-      y += s.code + '\n';
+      y += '# --step--\n' + this.steps[i].code + '\n';
       return y;
     },
     saveCurrentTask() {
@@ -996,14 +1087,17 @@ new Vue({
         this.currentYamlFile = `untitled_${Date.now()}.py`;
         this.taskName = this.taskName || '新建用例';
         this.taskPlatform = this.platform || 'android';
+        if (!this.projectId) {
+          this.projectId = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+        }
         saveToLocalStorage('currentYamlFile', this.currentYamlFile);
       }
       this.currentYamlContent = this.taskToYaml();
       saveTask(this.currentYamlFile, this.currentYamlContent).catch(() => {});
-      // Save any unsaved images for imglocate steps
+      // Save any unsaved images for imglocate steps to centralized dir
       this.steps.forEach((s) => {
         if (s._type === 'imglocate' && s.image && s.image_filename && !s._imageSaved) {
-          saveTaskImage(this.currentYamlFile, s.image_filename, s.image)
+          saveImage(s.image_filename, s.image)
             .then(() => { s._imageSaved = true; })
             .catch(() => {});
         }
@@ -1030,6 +1124,7 @@ new Vue({
       this.clearTask();
       this.taskName = '新建用例';
       this.taskPlatform = 'android';
+      this.projectId = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
       this.settingsVisible = true;
     },
     async openTasksFolder() {
@@ -1160,6 +1255,26 @@ new Vue({
     addLog(level, text) {
       this.logLines.push({ level, text: `${new Date().toLocaleTimeString()} ${text}` });
       if (!this.logOpen) this.logOpen = true;
+    },
+    async cleanupTaskImages() {
+      if (!this.currentYamlFile || !this.projectId) {
+        this.$message({ message: '无项目ID，无法清理', type: 'warning' });
+        return;
+      }
+      try {
+        this.addLog('info', '正在清理未引用图片...');
+        const res = await cleanupImages(this.currentYamlFile);
+        if (res.success) {
+          const removed = res.data.removed || 0;
+          const referenced = res.data.referenced || 0;
+          this.$message({ message: `清理完成: 删除 ${removed} 张, 保留 ${referenced} 张`, type: 'success' });
+          this.addLog('ok', `清理完成: 删除 ${removed} 张未引用图片`);
+        } else {
+          this.$message({ message: res.message || '清理失败', type: 'error' });
+        }
+      } catch (e) {
+        this.$message({ message: `清理错误: ${e.message}`, type: 'error' });
+      }
     },
 
     async deviceAction(key) {

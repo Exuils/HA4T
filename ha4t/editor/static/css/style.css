@@ -439,18 +439,19 @@ code {
 
 /* ── Image Step Card ── */
 .step-img {
-    padding: 6px 12px;
+    padding: 4px 10px;
     min-height: auto;
 }
 .img-step-card {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
-    height: 200px;
+    height: 70px;
+    align-items: center;
 }
 .img-step-preview {
-    width: 160px;
-    height: 100%;
+    width: 60px;
+    height: 60px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -468,9 +469,19 @@ code {
 .img-step-info {
     flex: 1;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
     overflow: hidden;
+    justify-content: space-between;
+    min-width: 0;
+}
+.img-step-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+    min-width: 0;
 }
 .img-step-title {
     display: flex;
@@ -484,18 +495,20 @@ code {
     padding: 1px 6px;
     border-radius: 3px;
     font-size: 11px;
+    flex-shrink: 0;
 }
 .img-step-params {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    flex-direction: row;
+    gap: 10px;
     color: #8492a6;
     font-size: 11px;
+    flex-wrap: wrap;
 }
 .img-step-btns {
     display: flex;
     gap: 2px;
-    margin-top: auto;
+    flex-shrink: 0;
 }
 
 /* ── Image Config Panel ── */
@@ -523,10 +536,6 @@ code {
 }
 .img-config-grid {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
     pointer-events: auto;
     cursor: crosshair;
 }

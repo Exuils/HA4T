@@ -67,6 +67,7 @@
                         <el-button size="mini" @click="deviceAction('volume_up')" :disabled="!isConnected" title="音量+">🔊</el-button>
                         <el-button size="mini" @click="deviceAction('volume_down')" :disabled="!isConnected" title="音量-">🔉</el-button>
                     </el-button-group>
+                    <el-button size="mini" @click="enterCaptureMode" :disabled="!isConnected || captureMode" title="添加图片定位步骤">🎯</el-button>
                     <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="刷新">刷新</el-button>
                 </div>
                 <div v-if="captureMode" class="capture-indicator">拖拽选择目标区域 (按 Esc 取消)</div>
@@ -122,6 +123,7 @@
                             <el-button size="small" @click="newYamlFile">新建</el-button>
                             <el-button size="small" @click="openTasksFolder" icon="el-icon-folder-opened">文件夹</el-button>
                             <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length">全部运行</el-button>
+                            <el-button size="small" @click="cleanupTaskImages" :disabled="!projectId" title="清理未引用图片">🧹</el-button>
                             <el-button size="small" @click="settingsVisible = true">设置</el-button>
                             <el-switch v-model="autoRun" active-text="自动运行" inactive-text="手动"
                                 size="small" style="margin-left: 4px;"></el-switch>
@@ -168,9 +170,10 @@
                                                 <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
                                             </div>
                                             <div class="img-step-params">
-                                                <span>网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
+                                                <span v-if="s.action === 'click'">网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
                                                 <span v-if="s.action === 'click'">点击: 第{{ s.click_col + 1 }}列, 第{{ s.click_row + 1 }}行</span>
                                                 <span>超时: {{ s.timeout }}s</span>
+                                                <span v-if="s.threshold">阈值: {{ s.threshold }}</span>
                                             </div>
                                             <div class="step-dur" v-if="s._duration">{{ s._duration }}s</div>
                                             <div class="img-step-btns">
@@ -234,11 +237,12 @@
                             <el-button @click="settingsVisible = false" size="small">取消</el-button>
                             <el-button type="primary" @click="applySettings" size="small">确定</el-button>
                         </span>
+                    </el-dialog>
                     <el-dialog title="图片定位配置" :visible.sync="imgConfigVisible" width="480px" top="10vh">
                         <div v-if="imgConfigStep" class="img-config-body">
                             <div class="img-config-preview-wrap">
-                                <img v-if="imgConfigStep.image" :src="imgConfigStep.image" class="img-config-preview" ref="imgConfigPreview" />
-                                <canvas class="img-config-grid" ref="imgConfigCanvas" @click="onGridCellClick"></canvas>
+                                <img v-if="imgConfigStep.image" :src="imgConfigStep.image" class="img-config-preview" ref="imgConfigPreview" @load="renderImgConfigGrid" />
+                                <canvas class="img-config-grid" ref="imgConfigCanvas" @click="onGridCellClick" v-if="imgConfigStep.action === 'click'"></canvas>
                             </div>
                             <el-form label-width="90px" size="small">
                                 <el-form-item label="操作类型">
@@ -248,11 +252,11 @@
                                         <el-radio-button label="wait_hide">等待消失</el-radio-button>
                                     </el-radio-group>
                                 </el-form-item>
-                                <el-form-item label="横向分割">
-                                    <el-slider v-model="imgConfigStep.grid_h" :min="1" :max="8" show-stops @change="renderImgConfigGrid"></el-slider>
+                                <el-form-item label="横向分割" v-if="imgConfigStep.action === 'click'">
+                                    <el-slider v-model="imgConfigStep.grid_h" :min="1" :max="15" show-stops @change="renderImgConfigGrid"></el-slider>
                                 </el-form-item>
-                                <el-form-item label="纵向分割">
-                                    <el-slider v-model="imgConfigStep.grid_v" :min="1" :max="8" show-stops @change="renderImgConfigGrid"></el-slider>
+                                <el-form-item label="纵向分割" v-if="imgConfigStep.action === 'click'">
+                                    <el-slider v-model="imgConfigStep.grid_v" :min="1" :max="15" show-stops @change="renderImgConfigGrid"></el-slider>
                                 </el-form-item>
                                 <el-form-item label="点击列" v-if="imgConfigStep.action === 'click'">
                                     <el-input-number v-model="imgConfigStep.click_col" :min="0" :max="imgConfigStep.grid_h - 1" size="small"></el-input-number>
@@ -265,6 +269,10 @@
                                 <el-form-item label="超时时间">
                                     <el-input-number v-model="imgConfigStep.timeout" :min="1" :max="60" size="small"></el-input-number>
                                     <span style="margin-left: 8px;">秒</span>
+                                </el-form-item>
+                                <el-form-item label="匹配阈值">
+                                    <el-input v-model="thresholdInput" size="small" placeholder="默认 (0.8)" style="width: 120px;"></el-input>
+                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">{{ thresholdInput ? '' : '使用系统默认 0.8' }}</span>
                                 </el-form-item>
                             </el-form>
                         </div>

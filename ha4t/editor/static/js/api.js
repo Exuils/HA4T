@@ -12,6 +12,20 @@ export async function getVersion() {
   return checkResponse(response);
 }
 
+export async function getConfig() {
+  const response = await fetch(`${API_HOST}config`);
+  return checkResponse(response);
+}
+
+export async function setConfig(key, value) {
+  const response = await fetch(`${API_HOST}config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value })
+  });
+  return checkResponse(response);
+}
+
 export async function listDevices(platform) {
   const response = await fetch(`${API_HOST}${platform}/serials`);
   return checkResponse(response);
@@ -99,21 +113,28 @@ export async function listPackages(platform, serial) {
   return checkResponse(response);
 }
 
-export async function listTaskImages(filename) {
-  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images`);
+export async function getProjectId(filename) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/project-id`);
   return checkResponse(response);
 }
 
-export async function getTaskImage(filename, imgname) {
-  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images/${encodeURIComponent(imgname)}`);
+export async function getImage(imgname) {
+  const response = await fetch(`${API_HOST}images/${encodeURIComponent(imgname)}`);
   return checkResponse(response);
 }
 
-export async function saveTaskImage(filename, imgname, data) {
-  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images/${encodeURIComponent(imgname)}`, {
+export async function saveImage(imgname, data) {
+  const response = await fetch(`${API_HOST}images/${encodeURIComponent(imgname)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data })
+  });
+  return checkResponse(response);
+}
+
+export async function cleanupImages(filename) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/cleanup-images`, {
+    method: 'POST'
   });
   return checkResponse(response);
 }
