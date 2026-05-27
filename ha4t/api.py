@@ -17,7 +17,8 @@ import PIL.Image
 import logreset
 import numpy as np
 
-from ha4t import screen_size, device
+import ha4t
+from ha4t import device
 from ha4t.aircv.cv import match_loop, Template
 from ha4t.config import Config as _CF
 from ha4t.utils.files_operat import get_file_list as _get_file_list
@@ -260,7 +261,7 @@ def swipe(p1, p2, duration=None, steps=None):
     """
 
     def calculate_position(p):
-        return (int(p[0] * screen_size[0]), int(p[1] * screen_size[1])) if isinstance(p[0], float) else p
+        return (int(p[0] * ha4t.screen_size[0]), int(p[1] * ha4t.screen_size[1])) if isinstance(p[0], float) else p
 
     pos1 = calculate_position(p1)
     pos2 = calculate_position(p2)
