@@ -10,7 +10,7 @@
 
 </head>
 <body>
-    <div id="app">
+    <div id="app" :class="{ 'capture-mode': captureMode }">
         <div class="header">
             <div style="margin-right: 20px;">
                 <span style="font-weight: bold; font-size: 20px;">UI 层级查看器</span>
@@ -69,6 +69,7 @@
                     </el-button-group>
                     <el-button size="mini" @click="screenshotAndDumpHierarchy" :disabled="!isConnected || isDumping" icon="el-icon-refresh" title="刷新">刷新</el-button>
                 </div>
+                <div v-if="captureMode" class="capture-indicator">拖拽选择目标区域 (按 Esc 取消)</div>
                 <canvas id="screenshotCanvas"></canvas>
                 <canvas id="hierarchyCanvas"></canvas>
             </div>
@@ -134,23 +135,55 @@
                             <div v-if="steps.length === 0" class="step-empty">
                                 在下方输入命令, 或按 <b>/</b> 选择动作
                             </div>
-                            <div v-for="(s, i) in steps" :key="i" class="step-row"
-                                :class="{ 'step-selected': selectedStepIndex === i }"
+                            <div v-for="(s, i) in steps" :key="i"
+                                :class="['step-row', s._type === 'imglocate' ? 'step-img' : '', { 'step-selected': selectedStepIndex === i }]"
                                 @click="selectStep(i)">
-                                <span class="step-icon" :class="stepIcon(s._status).cls">
-                                    {{ stepIcon(s._status).icon }}
-                                </span>
-                                <span class="step-num">{{ i + 1 }}.</span>
-                                <code class="step-code">{{ s.code }}</code>
-                                <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
-                                <div class="step-btns">
-                                    <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
-                                    <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
-                                    <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
-                                    <button class="sb" @click.stop="stepAction('edit', i)" title="编辑">E</button>
-                                    <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
-                                </div>
-                                <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
+                                <!-- Regular step -->
+                                <template v-if="s._type !== 'imglocate'">
+                                    <span class="step-icon" :class="stepIcon(s._status).cls">
+                                        {{ stepIcon(s._status).icon }}
+                                    </span>
+                                    <span class="step-num">{{ i + 1 }}.</span>
+                                    <code class="step-code">{{ s.code }}</code>
+                                    <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
+                                    <div class="step-btns">
+                                        <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
+                                        <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
+                                        <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
+                                        <button class="sb" @click.stop="stepAction('edit', i)" title="编辑">E</button>
+                                        <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
+                                    </div>
+                                    <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
+                                </template>
+                                <!-- Image locate step -->
+                                <template v-else>
+                                    <div class="img-step-card">
+                                        <div class="img-step-preview">
+                                            <img :src="s.image" alt="模板图片" />
+                                        </div>
+                                        <div class="img-step-info">
+                                            <div class="img-step-title">
+                                                <span class="step-icon" :class="stepIcon(s._status).cls">{{ stepIcon(s._status).icon }}</span>
+                                                <span class="step-num">{{ i + 1 }}.</span>
+                                                <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
+                                            </div>
+                                            <div class="img-step-params">
+                                                <span>网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
+                                                <span v-if="s.action === 'click'">点击: 第{{ s.click_col + 1 }}列, 第{{ s.click_row + 1 }}行</span>
+                                                <span>超时: {{ s.timeout }}s</span>
+                                            </div>
+                                            <div class="step-dur" v-if="s._duration">{{ s._duration }}s</div>
+                                            <div class="img-step-btns">
+                                                <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
+                                                <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
+                                                <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
+                                                <button class="sb" @click.stop="openImgConfig(i)" title="配置">⚙</button>
+                                                <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
+                                            </div>
+                                            <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                         <div class="cli-wrap">
@@ -201,8 +234,45 @@
                             <el-button @click="settingsVisible = false" size="small">取消</el-button>
                             <el-button type="primary" @click="applySettings" size="small">确定</el-button>
                         </span>
+                    <el-dialog title="图片定位配置" :visible.sync="imgConfigVisible" width="480px" top="10vh">
+                        <div v-if="imgConfigStep" class="img-config-body">
+                            <div class="img-config-preview-wrap">
+                                <img v-if="imgConfigStep.image" :src="imgConfigStep.image" class="img-config-preview" ref="imgConfigPreview" />
+                                <canvas class="img-config-grid" ref="imgConfigCanvas" @click="onGridCellClick"></canvas>
+                            </div>
+                            <el-form label-width="90px" size="small">
+                                <el-form-item label="操作类型">
+                                    <el-radio-group v-model="imgConfigStep.action">
+                                        <el-radio-button label="click">点击</el-radio-button>
+                                        <el-radio-button label="wait_show">等待显示</el-radio-button>
+                                        <el-radio-button label="wait_hide">等待消失</el-radio-button>
+                                    </el-radio-group>
+                                </el-form-item>
+                                <el-form-item label="横向分割">
+                                    <el-slider v-model="imgConfigStep.grid_h" :min="1" :max="8" show-stops @change="renderImgConfigGrid"></el-slider>
+                                </el-form-item>
+                                <el-form-item label="纵向分割">
+                                    <el-slider v-model="imgConfigStep.grid_v" :min="1" :max="8" show-stops @change="renderImgConfigGrid"></el-slider>
+                                </el-form-item>
+                                <el-form-item label="点击列" v-if="imgConfigStep.action === 'click'">
+                                    <el-input-number v-model="imgConfigStep.click_col" :min="0" :max="imgConfigStep.grid_h - 1" size="small"></el-input-number>
+                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">(从左到右, 0开始)</span>
+                                </el-form-item>
+                                <el-form-item label="点击行" v-if="imgConfigStep.action === 'click'">
+                                    <el-input-number v-model="imgConfigStep.click_row" :min="0" :max="imgConfigStep.grid_v - 1" size="small"></el-input-number>
+                                    <span style="margin-left: 8px; color: #8492a6; font-size: 12px;">(从上到下, 0开始)</span>
+                                </el-form-item>
+                                <el-form-item label="超时时间">
+                                    <el-input-number v-model="imgConfigStep.timeout" :min="1" :max="60" size="small"></el-input-number>
+                                    <span style="margin-left: 8px;">秒</span>
+                                </el-form-item>
+                            </el-form>
+                        </div>
+                        <span slot="footer">
+                            <el-button @click="imgConfigVisible = false" size="small">取消</el-button>
+                            <el-button type="primary" @click="applyImgConfig" size="small">确定</el-button>
+                        </span>
                     </el-dialog>
-                </el-tabs>
             </div>
         </div>
     </div>

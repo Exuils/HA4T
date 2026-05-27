@@ -98,3 +98,22 @@ export async function listPackages(platform, serial) {
   const response = await fetch(`${API_HOST}${platform}/${serial}/packages`);
   return checkResponse(response);
 }
+
+export async function listTaskImages(filename) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images`);
+  return checkResponse(response);
+}
+
+export async function getTaskImage(filename, imgname) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images/${encodeURIComponent(imgname)}`);
+  return checkResponse(response);
+}
+
+export async function saveTaskImage(filename, imgname, data) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/images/${encodeURIComponent(imgname)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data })
+  });
+  return checkResponse(response);
+}

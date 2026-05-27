@@ -1,5 +1,5 @@
 ﻿import { saveToLocalStorage, getFromLocalStorage, copyToClipboard } from './utils.js';
-import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages } from './api.js';
+import { getVersion, listDevices, connectDevice, fetchScreenshot, fetchHierarchy, fetchXpathLite, listTasks, getTask, saveTask, listPackages, saveTaskImage, getTaskImage } from './api.js';
 import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
@@ -9,6 +9,7 @@ const SLASH_STEP = [
   { action: 'key', desc: '系统按键' },
   { action: 'launchapp', desc: '启动应用' },
   { action: 'wait', desc: '等待秒数' },
+  { action: 'imglocate', desc: '图片定位 (模板匹配)' },
   { action: 'code', desc: '自定义代码' },
 ];
 
@@ -69,7 +70,20 @@ new Vue({
       logOpen: false,
       logLines: [],
       appsCache: [],
-      isRunning: false
+      isRunning: false,
+
+      // Image capture state
+      captureMode: false,
+      captureStart: null,
+      captureRect: null,
+
+      // Image step config panel
+      imgConfigVisible: false,
+      imgConfigStep: null,
+      imgConfigIndex: -1,
+
+      // New image step data
+      newImageStep: null
     };
   },
   computed: {
@@ -109,6 +123,11 @@ new Vue({
       },
       cliText() {
         this.onCliInput();
+      },
+      imgConfigVisible(val) {
+        if (val) {
+          this.$nextTick(() => this.renderImgConfigGrid());
+        }
       }
     },
   created() {
@@ -125,6 +144,9 @@ new Vue({
     canvas.addEventListener('click', this.onMouseClick);
     canvas.addEventListener('dblclick', this.onMouseDblClick);
     canvas.addEventListener('mouseleave', this.onMouseLeave);
+    canvas.addEventListener('mousedown', this.onCaptureMouseDown);
+    canvas.addEventListener('mousemove', this.onCaptureMouseMove);
+    canvas.addEventListener('mouseup', this.onCaptureMouseUp);
 
     this.setupCanvasResolution('#screenshotCanvas');
     this.setupCanvasResolution('#hierarchyCanvas');
@@ -384,6 +406,7 @@ new Vue({
       }
     },
     onMouseMove(event) {
+      if (this.captureMode) return;
       const canvas = this.$el.querySelector('#hierarchyCanvas');
       const rect = canvas.getBoundingClientRect();
       const mouseX = event.clientX - rect.left;
@@ -398,6 +421,7 @@ new Vue({
       }
     },
     async onMouseClick(event) {
+      if (this.captureMode) return;
       const canvas = this.$el.querySelector('#hierarchyCanvas');
       const rect = canvas.getBoundingClientRect();
       const mouseX = event.clientX - rect.left;
@@ -423,6 +447,119 @@ new Vue({
         // 保证每次点击重新计算`selectedNodeDetails`，更新点击坐标
         this.selectedNode = { ...this.selectedNode };
       }
+    },
+    onCaptureMouseDown(event) {
+      if (!this.captureMode) return;
+      const canvas = this.$el.querySelector('#hierarchyCanvas');
+      const rect = canvas.getBoundingClientRect();
+      this.captureStart = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+    },
+    onCaptureMouseMove(event) {
+      if (!this.captureMode || !this.captureStart) return;
+      const canvas = this.$el.querySelector('#hierarchyCanvas');
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      this.captureRect = {
+        x: Math.min(this.captureStart.x, x),
+        y: Math.min(this.captureStart.y, y),
+        w: Math.abs(x - this.captureStart.x),
+        h: Math.abs(y - this.captureStart.y)
+      };
+      this.renderCaptureRect();
+    },
+    async onCaptureMouseUp(event) {
+      if (!this.captureMode || !this.captureStart) return;
+      const canvas = this.$el.querySelector('#hierarchyCanvas');
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const captureRect = {
+        x: Math.min(this.captureStart.x, x),
+        y: Math.min(this.captureStart.y, y),
+        w: Math.abs(x - this.captureStart.x),
+        h: Math.abs(y - this.captureStart.y)
+      };
+      this.captureStart = null;
+      this.captureRect = null;
+      this.renderCaptureRect();
+      if (captureRect.w < 10 || captureRect.h < 10) {
+        this.$message({ message: '选择区域太小，已取消', type: 'warning' });
+        this.exitCaptureMode();
+        return;
+      }
+      await this.createImageStep(captureRect);
+      this.exitCaptureMode();
+    },
+    renderCaptureRect() {
+      const canvas = this.$el.querySelector('#hierarchyCanvas');
+      const ctx = canvas.getContext('2d');
+      // Redraw hierarchy first
+      this.renderHierarchy();
+      if (this.captureRect && this.captureRect.w > 0) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
+        ctx.fillRect(this.captureRect.x, this.captureRect.y, this.captureRect.w, this.captureRect.h);
+      }
+    },
+    async createImageStep(rect) {
+      const { scale, offsetX, offsetY } = this.screenshotTransform;
+      // Convert canvas coords to screenshot image coords
+      const imgX = Math.round((rect.x - offsetX) / scale);
+      const imgY = Math.round((rect.y - offsetY) / scale);
+      const imgW = Math.round(rect.w / scale);
+      const imgH = Math.round(rect.h / scale);
+      // Get cached screenshot base64
+      const base64Data = getFromLocalStorage('cachedScreenshot', null);
+      if (!base64Data) {
+        this.$message({ message: '无截图缓存，请刷新后重试', type: 'warning' });
+        return;
+      }
+      // Create image and crop
+      const img = new Image();
+      img.src = `data:image/png;base64,${base64Data}`;
+      await new Promise(r => { img.onload = r; });
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = imgW;
+      cropCanvas.height = imgH;
+      const ctx = cropCanvas.getContext('2d');
+      ctx.drawImage(img, imgX, imgY, imgW, imgH, 0, 0, imgW, imgH);
+      const croppedBase64 = cropCanvas.toDataURL('image/png');
+      // Generate filename
+      const imgName = `step_${Date.now()}.png`;
+      const stepIdx = this.steps.length;
+      const step = {
+        _type: 'imglocate',
+        action: 'click',
+        image: croppedBase64,
+        image_filename: imgName,
+        grid_h: 1,
+        grid_v: 1,
+        click_col: 0,
+        click_row: 0,
+        timeout: 10,
+        code: `click(image="${imgName}")`,
+        _status: 'pending',
+        _detail: '',
+        _duration: null,
+        _imageSaved: false
+      };
+      this.steps.push(step);
+      this.selectedStepIndex = stepIdx;
+      // Save image to server
+      this.ensureFile();
+      if (this.currentYamlFile) {
+        await saveTaskImage(this.currentYamlFile, imgName, croppedBase64)
+          .then(() => { step._imageSaved = true; })
+          .catch(() => {});
+      }
+      this.$message({ message: `已添加图片定位步骤`, type: 'success' });
     },
     onMouseLeave() {
       if (this.hoveredNode) {
@@ -516,6 +653,17 @@ new Vue({
           this.currentYamlFile = filename;
           this.currentYamlContent = res.data.content;
           this.parseYamlToTask(res.data.content);
+          // Load images for imglocate steps
+          for (const step of this.steps) {
+            if (step._type === 'imglocate' && step.image_filename) {
+              try {
+                const imgRes = await getTaskImage(filename, step.image_filename);
+                if (imgRes.success && imgRes.data && imgRes.data.data) {
+                  step.image = 'data:image/png;base64,' + imgRes.data.data;
+                }
+              } catch (e) { /* ignore */ }
+            }
+          }
           saveToLocalStorage('currentYamlFile', filename);
           this.addLog('info', `已加载: ${filename}`);
         }
@@ -526,6 +674,7 @@ new Vue({
     parseYamlToTask(content) {
       const lines = content.split('\n');
       let name = '', desc = '', platform = 'android', inStep = false, stepBuf = [];
+      let stepMeta = null;
       const steps = [];
       const extraLines = [];
       let inExtra = true;
@@ -534,12 +683,20 @@ new Vue({
         if (line.startsWith('# desc:')) { desc = line.split(':')[1].trim(); continue; }
         if (line.startsWith('# platform:')) { platform = line.split(':')[1].trim(); continue; }
         if (line.trim() === '# --step--') {
-          if (inStep && stepBuf.length) { steps.push({ code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null }); stepBuf = []; }
+          if (inStep && stepBuf.length) {
+            const s = { code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null };
+            if (stepMeta) { Object.assign(s, stepMeta); s._type = 'imglocate'; }
+            steps.push(s); stepBuf = []; stepMeta = null;
+          }
           inStep = true; inExtra = false;
           continue;
         }
         if (inStep) {
           const t = line.trim();
+          if (t.startsWith('# @imglocate')) {
+            try { stepMeta = JSON.parse(t.slice('# @imglocate'.length).trim()); } catch (e) { stepMeta = null; }
+            continue;
+          }
           if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
             stepBuf.push(line);
           }
@@ -549,7 +706,11 @@ new Vue({
           }
         }
       }
-      if (inStep && stepBuf.length) { steps.push({ code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null }); }
+      if (inStep && stepBuf.length) {
+        const s = { code: stepBuf.join('\n'), _status: 'pending', _detail: '', _duration: null };
+        if (stepMeta) { Object.assign(s, stepMeta); s._type = 'imglocate'; }
+        steps.push(s);
+      }
       this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform;
       this.steps = steps; this._extraLines = extraLines;
     },
@@ -560,7 +721,15 @@ new Vue({
       y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
       y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
       if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
-      this.steps.forEach(s => { y += '\n# --step--\n' + s.code + '\n'; });
+      this.steps.forEach(s => {
+        y += '\n# --step--\n';
+        if (s._type === 'imglocate') {
+          const meta = {};
+          ['action','image_filename','grid_h','grid_v','click_col','click_row','timeout'].forEach(k => { if (s[k] !== undefined) meta[k] = s[k]; });
+          y += '# @imglocate ' + JSON.stringify(meta) + '\n';
+        }
+        y += s.code + '\n';
+      });
       return y;
     },
     clearTask() {
@@ -573,11 +742,27 @@ new Vue({
       this.selectedStepIndex = -1;
     },
     addStep(action, value) {
+      if (action === 'imglocate') {
+        this.enterCaptureMode();
+        return;
+      }
       const code = this.stepToCode(action, value);
       this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
     },
+    enterCaptureMode() {
+      this.captureMode = true;
+      this.captureStart = null;
+      this.captureRect = null;
+      this.$message({ message: '请在截图上拖拽选择目标区域', type: 'info', duration: 3000 });
+    },
+    exitCaptureMode() {
+      this.captureMode = false;
+      this.captureStart = null;
+      this.captureRect = null;
+    },
     stepToCode(action, value) {
+      if (action === 'imglocate') return '# 图片定位 - 等待配置';
       const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
       const m = {
         tap: `click(text="${esc(value)}")`,
@@ -596,7 +781,114 @@ new Vue({
       else if (type === 'edit') { this.cliText = this.steps[i].code; this.cliPrefix = ''; this.selectedStepIndex = i; this.$nextTick(() => this.$refs.cliInput.focus()); }
       else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.ensureFile(); }
     },
-    selectStep(i) { this.selectedStepIndex = i; },
+    selectStep(i) { 
+      this.selectedStepIndex = i; 
+      if (this.steps[i] && this.steps[i]._type === 'imglocate') {
+        this.openImgConfig(i);
+      }
+    },
+    openImgConfig(i) {
+      this.imgConfigIndex = i;
+      this.imgConfigStep = JSON.parse(JSON.stringify(this.steps[i]));
+      this.imgConfigVisible = true;
+    },
+    renderImgConfigGrid() {
+      const canvas = this.$refs.imgConfigCanvas;
+      const img = this.$refs.imgConfigPreview;
+      if (!canvas || !img) return;
+      canvas.width = img.clientWidth;
+      canvas.height = img.clientHeight;
+      canvas.style.width = img.clientWidth + 'px';
+      canvas.style.height = img.clientHeight + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const step = this.imgConfigStep;
+      if (!step) return;
+      const cols = step.grid_h;
+      const rows = step.grid_v;
+      const cellW = canvas.width / cols;
+      const cellH = canvas.height / rows;
+      // Draw grid lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      for (let c = 1; c < cols; c++) {
+        ctx.beginPath();
+        ctx.moveTo(c * cellW, 0);
+        ctx.lineTo(c * cellW, canvas.height);
+        ctx.stroke();
+      }
+      for (let r = 1; r < rows; r++) {
+        ctx.beginPath();
+        ctx.moveTo(0, r * cellH);
+        ctx.lineTo(canvas.width, r * cellH);
+        ctx.stroke();
+      }
+      // Highlight selected cell
+      if (step.action === 'click') {
+        ctx.fillStyle = 'rgba(54, 121, 227, 0.4)';
+        ctx.fillRect(step.click_col * cellW, step.click_row * cellH, cellW, cellH);
+        ctx.strokeStyle = '#3679E3';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(step.click_col * cellW, step.click_row * cellH, cellW, cellH);
+        // Draw cross at center
+        const cx = step.click_col * cellW + cellW / 2;
+        const cy = step.click_row * cellH + cellH / 2;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, cy);
+        ctx.lineTo(cx + 6, cy);
+        ctx.moveTo(cx, cy - 6);
+        ctx.lineTo(cx, cy + 6);
+        ctx.stroke();
+      }
+    },
+    onGridCellClick(event) {
+      if (!this.imgConfigStep || this.imgConfigStep.action !== 'click') return;
+      const canvas = this.$refs.imgConfigCanvas;
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const cols = this.imgConfigStep.grid_h;
+      const rows = this.imgConfigStep.grid_v;
+      const cellW = canvas.width / cols;
+      const cellH = canvas.height / rows;
+      const col = Math.min(Math.max(Math.floor(x / cellW), 0), cols - 1);
+      const row = Math.min(Math.max(Math.floor(y / cellH), 0), rows - 1);
+      this.imgConfigStep.click_col = col;
+      this.imgConfigStep.click_row = row;
+      this.renderImgConfigGrid();
+    },
+    applyImgConfig() {
+      if (this.imgConfigIndex < 0 || !this.imgConfigStep) return;
+      const step = this.steps[this.imgConfigIndex];
+      // Update step properties
+      step.action = this.imgConfigStep.action;
+      step.grid_h = this.imgConfigStep.grid_h;
+      step.grid_v = this.imgConfigStep.grid_v;
+      step.click_col = this.imgConfigStep.click_col;
+      step.click_row = this.imgConfigStep.click_row;
+      step.timeout = this.imgConfigStep.timeout;
+      // Regenerate code
+      step.code = this.generateImgCode(step);
+      this.$set(this.steps, this.imgConfigIndex, { ...step });
+      this.imgConfigVisible = false;
+      this.saveCurrentTask();
+    },
+    generateImgCode(step) {
+      const imgPath = step.image_filename || 'template.png';
+      if (step.action === 'click') {
+        if (step.grid_h === 1 && step.grid_v === 1) {
+          return `click(image="${imgPath}")`;
+        }
+        return `click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v}))`;
+      } else if (step.action === 'wait_show') {
+        return `wait(image="${imgPath}", timeout=${step.timeout})`;
+      } else if (step.action === 'wait_hide') {
+        return `wait(image="${imgPath}", timeout=${step.timeout}, reverse=True)`;
+      }
+      return `click(image="${imgPath}")`;
+    },
     stepIcon(status) {
       status = status || 'pending';
       const m = { pending: '○', running: '◐', ok: '●', fail: '✖' };
@@ -689,7 +981,14 @@ new Vue({
       let y = `# name: ${this.taskName}\n# platform: ${this.taskPlatform}\n`;
       y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
       y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
-      y += '# --step--\n' + this.steps[i].code + '\n';
+      const s = this.steps[i];
+      y += '# --step--\n';
+      if (s._type === 'imglocate') {
+        const meta = {};
+        ['action','image_filename','grid_h','grid_v','click_col','click_row','timeout'].forEach(k => { if (s[k] !== undefined) meta[k] = s[k]; });
+        y += '# @imglocate ' + JSON.stringify(meta) + '\n';
+      }
+      y += s.code + '\n';
       return y;
     },
     saveCurrentTask() {
@@ -701,6 +1000,14 @@ new Vue({
       }
       this.currentYamlContent = this.taskToYaml();
       saveTask(this.currentYamlFile, this.currentYamlContent).catch(() => {});
+      // Save any unsaved images for imglocate steps
+      this.steps.forEach((s) => {
+        if (s._type === 'imglocate' && s.image && s.image_filename && !s._imageSaved) {
+          saveTaskImage(this.currentYamlFile, s.image_filename, s.image)
+            .then(() => { s._imageSaved = true; })
+            .catch(() => {});
+        }
+      });
       this.refreshYamlFiles();
     },
     ensureFile() {
@@ -748,6 +1055,7 @@ new Vue({
       } else if (e.key === 'Escape') {
         this.slashVisible = false;
         if (this.cliPrefix) { this.cliPrefix = ''; this.cliText = ''; }
+        if (this.captureMode) { this.exitCaptureMode(); }
       }
     },
     onCliInput() {
@@ -777,6 +1085,17 @@ new Vue({
       const m2 = line.match(/^(\w+):\s*(.*)/);
       if (!m2) return;
       const action = m2[1], value = m2[2] || '';
+
+      // Image locate steps require screenshot selection first
+      if (action === 'imglocate') {
+        this.addStep('imglocate', value);
+        this.cliText = '';
+        this.cliPrefix = '';
+        this.selectedStepIndex = -1;
+        this.slashVisible = false;
+        return;
+      }
+
       const code = this.stepToCode(action, value);
       let idx = this.selectedStepIndex;
       if (idx >= 0 && idx < this.steps.length) {
@@ -799,6 +1118,13 @@ new Vue({
         this.cliText = item.key;
         this.slashVisible = false;
         this.$nextTick(() => this.$refs.cliInput.focus());
+        return;
+      }
+      if (item.action === 'imglocate') {
+        this.addStep('imglocate', '');
+        this.slashVisible = false;
+        this.cliText = '';
+        this.cliPrefix = '';
         return;
       }
       this.cliPrefix = item.action;
@@ -847,6 +1173,7 @@ new Vue({
     },
 
     onMouseDblClick() {
+      if (this.captureMode) return;
       if (this.selectedNode && this.rightTab === 'editor') {
         this.insertStepFromElement();
       }

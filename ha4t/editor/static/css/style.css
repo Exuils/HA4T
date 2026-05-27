@@ -418,3 +418,115 @@ code {
 .log-ok { color: #67c23a; }
 .log-fail { color: #f56c6c; }
 .log-warn { color: #e6a23c; }
+
+.capture-mode #hierarchyCanvas {
+    cursor: crosshair !important;
+}
+
+.capture-indicator {
+    position: absolute;
+    top: 35px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(54, 121, 227, 0.9);
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 20;
+    pointer-events: none;
+}
+
+/* ── Image Step Card ── */
+.step-img {
+    padding: 6px 12px;
+    min-height: auto;
+}
+.img-step-card {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    height: 200px;
+}
+.img-step-preview {
+    width: 160px;
+    height: 100%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a2530;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #2a3040;
+}
+.img-step-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.img-step-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+}
+.img-step-title {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+}
+.img-step-badge {
+    background: #3679E3;
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.img-step-params {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #8492a6;
+    font-size: 11px;
+}
+.img-step-btns {
+    display: flex;
+    gap: 2px;
+    margin-top: auto;
+}
+
+/* ── Image Config Panel ── */
+.img-config-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.img-config-preview-wrap {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    background: #1a2530;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #2a3040;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.img-config-preview {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.img-config-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
+    cursor: crosshair;
+}

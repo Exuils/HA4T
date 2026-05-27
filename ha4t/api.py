@@ -83,8 +83,32 @@ def click(*args, duration: float = 0.1, **kwargs) -> None:
                 device.driver(**args[0], **kwargs).long_click(duration=duration)
     elif kwargs.get("image"):
         path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
-        pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
-                         threshold=kwargs.get("threshold", 0.8))
+        grid = kwargs.pop("grid", None)
+        splits = kwargs.pop("splits", None)
+        if grid and splits:
+            # Grid-based click: match template, then click center of specified grid cell
+            import cv2
+            from ha4t.aircv.cv import Template
+            source_image = device.driver.screenshot()
+            source_image = np.array(source_image.resize((_CF.SCREEN_WIDTH, _CF.SCREEN_HEIGHT)))
+            template = Template(path, threshold=kwargs.get("threshold", 0.8), rgb=kwargs.get("rgb", False),
+                                scale_max=kwargs.get("scale_max", 800), scale_step=kwargs.get("scale_step", 0.005))
+            result = template._cv_match(source_image)
+            if not result:
+                raise TimeoutError(f"图片匹配失败: {path}")
+            rect = result["rectangle"]  # [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]
+            x1, y1 = rect[0]
+            x3, y3 = rect[2]
+            w = x3 - x1
+            h = y3 - y1
+            cell_w = w / splits[0]
+            cell_h = h / splits[1]
+            target_x = x1 + cell_w * (grid[0] + 0.5)
+            target_y = y1 + cell_h * (grid[1] + 0.5)
+            pos = (int(target_x), int(target_y))
+        else:
+            pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+                             threshold=kwargs.get("threshold", 0.8))
         perform_click(*pos, duration)
     else:
         timeout = kwargs.pop("timeout", 3)
@@ -143,11 +167,11 @@ def _exists(*args, **kwargs) -> bool:
     else:
         if kwargs.get("image"):
             path = os.path.join(_CF.CURRENT_PATH, kwargs["image"])
-            pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
-                             threshold=kwargs.get("threshold", 0.8))
-            if pos:
-                return True
-            else:
+            try:
+                pos = match_loop(screenshot_func=device.driver.screenshot, template=path, timeout=kwargs.get("timeout", 10),
+                                 threshold=kwargs.get("threshold", 0.8))
+                return True if pos else False
+            except Exception:
                 return False
         else:
             return device.driver(**kwargs).exists

@@ -1,5 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 
+import base64
 import json
 import os
 import re
@@ -22,6 +23,7 @@ from ha4t.editor._version import __version__
 from ha4t.editor._models import (    ApiResponse, XPathLiteRequest,
     TaskFile, TaskSaveRequest, TaskRunRequest, TaskStepResult, TaskRunResponse
 )
+from pydantic import BaseModel
 from ha4t.editor.parser.xpath_lite import XPathLiteGenerator
 
 
@@ -134,24 +136,35 @@ def press_key(platform: str, serial: str, key: str):
 # ── Task API (.py + # --step--) ──────────────────────────
 
 
+import json as _json
+
 def _parse_py_steps(content: str) -> list:
-    """Parse # --step-- markers, return list of {code}"""
+    """Parse # --step-- markers, return list of {code, meta}"""
     lines = content.split('\n')
     steps = []
     buf = []
+    meta = None
     in_step = False
     for line in lines:
         stripped = line.strip()
         if stripped == _STEP_MARKER:
             if in_step and buf:
-                steps.append('\n'.join(buf).strip())
+                steps.append({'code': '\n'.join(buf).strip(), 'meta': meta})
                 buf = []
+                meta = None
             in_step = True
             continue
-        if in_step and stripped and not stripped.startswith('#'):
-            buf.append(line)
+        if in_step:
+            if stripped.startswith('# @imglocate'):
+                try:
+                    meta = _json.loads(stripped[len('# @imglocate'):].strip())
+                except Exception:
+                    pass
+                continue
+            if stripped and not stripped.startswith('#'):
+                buf.append(line)
     if in_step and buf:
-        steps.append('\n'.join(buf).strip())
+        steps.append({'code': '\n'.join(buf).strip(), 'meta': meta})
     return steps
 
 
@@ -168,7 +181,7 @@ def _extract_meta(content: str) -> dict:
     return {'name': name, 'desc': desc, 'platform': platform}
 
 
-def _generate_py(name, desc, platform, step_codes, extra_lines=None):
+def _generate_py(name, desc, platform, steps, extra_lines=None):
     lines = ['# name: ' + name]
     if desc:
         lines.append('# desc: ' + desc)
@@ -181,9 +194,12 @@ def _generate_py(name, desc, platform, step_codes, extra_lines=None):
     lines.append('')
     if extra_lines:
         lines.extend(extra_lines)
-    for code in step_codes:
+    for step in steps:
         lines.append(_STEP_MARKER)
-        lines.append(code)
+        meta = step.get('meta')
+        if meta and meta.get('_type') == 'imglocate':
+            lines.append('# @imglocate ' + _json.dumps(meta, ensure_ascii=False, separators=(',', ':')))
+        lines.append(step['code'])
     lines.append('')
     return '\n'.join(lines)
 
@@ -221,6 +237,42 @@ def save_task(filename: str, req: TaskSaveRequest):
     return ApiResponse.doSuccess({"filename": filename, "saved": True})
 
 
+@router.get("/tasks/{filename:path}/images", response_model=ApiResponse)
+def list_task_images(filename: str):
+    stem = Path(filename).stem
+    img_dir = TASKS_DIR / f"{stem}_imgs"
+    if not img_dir.exists():
+        return ApiResponse.doSuccess([])
+    files = [p.name for p in sorted(img_dir.glob("*.png"))]
+    return ApiResponse.doSuccess(files)
+
+
+@router.get("/tasks/{filename:path}/images/{imgname}", response_model=ApiResponse)
+def get_task_image(filename: str, imgname: str):
+    stem = Path(filename).stem
+    img_path = TASKS_DIR / f"{stem}_imgs" / imgname
+    if not img_path.exists():
+        return ApiResponse.doError(f"Image not found: {imgname}")
+    data = base64.b64encode(img_path.read_bytes()).decode("utf-8")
+    return ApiResponse.doSuccess({"filename": imgname, "data": data})
+
+
+class ImageUploadRequest(BaseModel):
+    data: str
+
+@router.post("/tasks/{filename:path}/images/{imgname}", response_model=ApiResponse)
+def save_task_image(filename: str, imgname: str, req: ImageUploadRequest):
+    stem = Path(filename).stem
+    img_dir = TASKS_DIR / f"{stem}_imgs"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    img_path = img_dir / imgname
+    data = req.data or ""
+    if data.startswith("data:image"):
+        data = data.split(",", 1)[1]
+    img_path.write_bytes(base64.b64decode(data))
+    return ApiResponse.doSuccess({"filename": imgname, "saved": True})
+
+
 @router.websocket("/ws/run")
 async def ws_run_task(ws: WebSocket):
     await ws.accept()
@@ -241,6 +293,16 @@ async def ws_run_task(ws: WebSocket):
     tmpdir = Path(tempfile.mkdtemp())
     tmppy = tmpdir / (filename or "untitled.py")
     tmppy.write_text(content, encoding="utf-8")
+
+    # Copy referenced images to temp dir so the script can find them
+    stem = Path(filename).stem
+    img_dir = TASKS_DIR / f"{stem}_imgs"
+    if img_dir.exists():
+        for img in img_dir.glob("*.png"):
+            try:
+                shutil.copy(img, tmpdir / img.name)
+            except Exception:
+                pass
 
     step_codes = _parse_py_steps(content)
     total = len(step_codes)
