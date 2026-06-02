@@ -63,6 +63,7 @@ new Vue({
       logOpen: false,
       logLines: [],
       appsCache: [],
+      
       isRunning: false,
       _extraLines: [],
 

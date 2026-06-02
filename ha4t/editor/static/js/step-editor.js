@@ -1,4 +1,4 @@
-import { saveToLocalStorage } from './utils.js';
+﻿import { saveToLocalStorage } from './utils.js';
 import { listTasks, getTask, saveTask, listPackages, cleanupImages, saveImage, getImage } from './api.js';
 import { API_HOST } from './config.js';
 
@@ -11,6 +11,52 @@ const SLASH_STEP = [
   { action: 'wait', desc: '等待秒数' },
   { action: 'imglocate', desc: '图片定位 (模板匹配)' },
   { action: 'code', desc: '自定义代码' },
+];
+
+const KEY_OPTIONS = [
+  { key: 'home', desc: '主页键' },
+  { key: 'back', desc: '返回键' },
+  { key: 'menu', desc: '菜单键' },
+  { key: 'volume_up', desc: '音量+' },
+  { key: 'volume_down', desc: '音量-' },
+  { key: 'power', desc: '电源键' },
+  { key: 'camera', desc: '相机键' },
+  { key: 'clear', desc: '清除键' },
+  { key: 'enter', desc: '回车键' },
+  { key: 'delete', desc: '删除键' },
+  { key: 'dpad_up', desc: '方向键 上' },
+  { key: 'dpad_down', desc: '方向键 下' },
+  { key: 'dpad_left', desc: '方向键 左' },
+  { key: 'dpad_right', desc: '方向键 右' },
+  { key: 'search', desc: '搜索键' },
+  { key: 'recent', desc: '最近任务键' },
+  { key: 'notifications', desc: '通知栏' },
+  { key: 'settings', desc: '系统设置' },
+  { key: 'space', desc: '空格键' },
+  { key: 'tab', desc: 'Tab 键' },
+  { key: 'escape', desc: 'Esc 键' },
+  { key: 'del', desc: 'Del 键' },
+  { key: 'forward_del', desc: 'Forward Del' },
+  { key: 'move_home', desc: '光标移到行首' },
+  { key: 'move_end', desc: '光标移到行尾' },
+  { key: 'page_up', desc: '上翻页' },
+  { key: 'page_down', desc: '下翻页' },
+  { key: 'caps_lock', desc: '大写锁定' },
+  { key: 'break', desc: 'Break 键' },
+  { key: 'insert', desc: 'Insert 键' },
+  { key: 'num_lock', desc: '数字锁定' },
+  { key: 'call', desc: '拨号键' },
+  { key: 'endcall', desc: '挂断键' },
+  { key: 'star', desc: '星号键 *' },
+  { key: 'pound', desc: '井号键 #' },
+  { key: 'comma', desc: '逗号键' },
+  { key: 'period', desc: '句号键' },
+  { key: 'alt_left', desc: '左 Alt 键' },
+  { key: 'alt_right', desc: '右 Alt 键' },
+  { key: 'shift_left', desc: '左 Shift 键' },
+  { key: 'shift_right', desc: '右 Shift 键' },
+  { key: 'ctrl_left', desc: '左 Ctrl 键' },
+  { key: 'ctrl_right', desc: '右 Ctrl 键' },
 ];
 
 export const StepEditorMethods = {
@@ -306,6 +352,14 @@ export const StepEditorMethods = {
         .slice(0, 20)
         .map(p => ({ key: p, desc: '', isApp: true }));
       this.slashIdx = 0;
+    } else if (this.cliPrefix === 'key') {
+      const q = this.cliText.toLowerCase();
+      this.slashVisible = true;
+      this.slashItems = KEY_OPTIONS
+        .filter(k => k.key.includes(q) || k.desc.toLowerCase().includes(q))
+        .slice(0, 30)
+        .map(k => ({ key: k.key, desc: k.desc, isKey: true }));
+      this.slashIdx = 0;
     } else {
       this.slashVisible = false;
     }
@@ -350,6 +404,12 @@ export const StepEditorMethods = {
       this.$nextTick(() => this.$refs.cliInput.focus());
       return;
     }
+    if (item.isKey) {
+      this.cliText = item.key;
+      this.slashVisible = false;
+      this.$nextTick(() => this.$refs.cliInput.focus());
+      return;
+    }
     if (item.action === 'imglocate') {
       this.addStep('imglocate', ''); this.slashVisible = false; this.cliText = ''; this.cliPrefix = '';
       return;
@@ -362,6 +422,9 @@ export const StepEditorMethods = {
     this.cliText = '';
     if (item.action === 'launchapp') {
       this.loadApps();
+      this.$nextTick(() => this.onCliInput());
+    }
+    if (item.action === 'key') {
       this.$nextTick(() => this.onCliInput());
     }
     this.cliPlaceholder = item.desc;
