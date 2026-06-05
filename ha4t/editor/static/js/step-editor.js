@@ -587,16 +587,9 @@ export const StepEditorMethods = {
 
     const code = this.stepToCode(action, value);
     this.pushUndo();
-    let idx = this.selectedStepIndex;
-    if (idx >= 0 && idx < this.steps.length) {
-      this.steps[idx].code = code;
-      this.steps[idx]._status = 'pending';
-      this.saveCurrentTask();
-    } else {
-      idx = this.steps.length;
-      this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
-      this.saveCurrentTask();
-    }
+    const idx = this.steps.length;
+    this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
+    this.saveCurrentTask();
     this.selectedNode = null;
     this.cliText = ''; this.cliPrefix = ''; this.selectedStepIndex = idx; this.slashVisible = false;
     if (this.autoRun) this.runSingleStep(idx);
