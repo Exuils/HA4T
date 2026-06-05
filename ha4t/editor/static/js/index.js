@@ -197,7 +197,7 @@ new Vue({
       const [p1, p2] = this.swipePoints;
       const code = `swipe((${p1.x.toFixed(3)}, ${p1.y.toFixed(3)}), (${p2.x.toFixed(3)}, ${p2.y.toFixed(3)}))`;
       const idx = this.steps.length;
-      this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+      this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
       this.$message({ message: `已添加滑动: ${code}`, type: 'success' });
       this.exitSwipeRecordMode();

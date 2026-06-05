@@ -457,6 +457,23 @@ code {
     padding: 4px 10px;
     min-height: auto;
 }
+.step-remark-badge {
+    position: absolute;
+    top: -1px;
+    left: 0;
+    max-width: 50%;
+    background: #e6a23c;
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 0 4px 4px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 5;
+    line-height: 1.4;
+    pointer-events: none;
+}
 .img-step-card {
     display: flex;
     gap: 8px;

@@ -153,39 +153,60 @@ export const StepEditorMethods = {
 
   // ── Steps parsing ──
 
-  _parseStepCode(code, stepMeta) {
-    // If metadata is provided, use it to restore structured step
-    if (stepMeta) {
-      if (stepMeta.stepType === 'element') {
-        const s = {
-          code,
-          stepType: 'element',
-          elementAction: stepMeta.elementAction || 'click',
-          selector: stepMeta.selector || {},
-          elementParams: stepMeta.elementParams || {},
-          _status: 'pending', _detail: '', _duration: null
-        };
-        return s;
-      }
-      if (stepMeta.stepType === 'imglocate') {
-        const s = {
-          code,
-          _type: 'imglocate',
-          action: stepMeta.action || 'click',
-          image_filename: stepMeta.image_filename,
-          image: null,
-          grid_h: stepMeta.grid_h || 1,
-          grid_v: stepMeta.grid_v || 1,
-          click_col: stepMeta.click_col || 0,
-          click_row: stepMeta.click_row || 0,
-          timeout: stepMeta.timeout || 10,
-          threshold: stepMeta.threshold || null,
-          _status: 'pending', _detail: '', _duration: null
-        };
-        return s;
-      }
-    }
+  _parseStepCode(code) {
     const s = { code, _status: 'pending', _detail: '', _duration: null };
+    
+    // Try to parse as element step from code string
+    const elMatch = code.match(/^(click|double_click|long_press|drag|assert_element)\((.*)\)$/);
+    if (elMatch) {
+      const func = elMatch[1];
+      const argsStr = elMatch[2];
+      const args = this._parseKwArgs(argsStr);
+
+      // Build selector from known UI selector keys
+      const selector = {};
+      const selectorKeys = ['text', 'resourceId', 'className', 'xpath', 'description', 'index'];
+      for (const k of selectorKeys) {
+        if (args[k] !== undefined) selector[k] = args[k];
+      }
+      delete args.text; delete args.resourceId; delete args.className;
+      delete args.xpath; delete args.description; delete args.index;
+
+      // Remaining args are elementParams
+      const elementParams = {};
+      if (func === 'click') {
+        s.stepType = 'element';
+        s.elementAction = 'click';
+        s.selector = selector;
+        s.elementParams = {};
+      } else if (func === 'double_click') {
+        s.stepType = 'element';
+        s.elementAction = 'double_click';
+        s.selector = selector;
+        s.elementParams = { interval: args.interval || 0.05 };
+      } else if (func === 'long_press') {
+        s.stepType = 'element';
+        s.elementAction = 'long_press';
+        s.selector = selector;
+        s.elementParams = { duration: args.duration || 1.0 };
+      } else if (func === 'drag') {
+        s.stepType = 'element';
+        s.elementAction = 'drag';
+        s.selector = selector;
+        s.elementParams = { dx: args.dx || 0, dy: args.dy || 0, dragDuration: args.duration || 0.5 };
+      } else if (func === 'assert_element') {
+        s.stepType = 'element';
+        s.elementAction = 'assert';
+        s.selector = selector;
+        const op = args.operator || 'eq';
+        const ext = args.extract || 'text';
+        s.elementParams = { operator: op, extract: ext };
+        if (args.expected !== undefined) s.elementParams.expected = args.expected;
+      }
+      return s;
+    }
+
+    // Try to parse as image locate step from code
     const imgMatch = code.match(/image=["']([^"']+)["']/);
     if (!imgMatch) return s;
     s._type = 'imglocate';
@@ -213,9 +234,22 @@ export const StepEditorMethods = {
     return s;
   },
 
+  _parseKwArgs(argsStr) {
+    // Parse key="value", key='value', key=123, key=0.5 style keyword arguments
+    const args = {};
+    const re = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([\d.]+)|(true|false|null|undefined))/g;
+    let m;
+    while ((m = re.exec(argsStr)) !== null) {
+      const key = m[1];
+      const val = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : (m[4] !== undefined ? parseFloat(m[4]) : m[5]));
+      args[key] = val;
+    }
+    return args;
+  },
+
   parseYamlToTask(content) {
     const lines = content.split('\n');
-    let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [], stepMeta = null;
+    let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [], remark = '';
     const steps = [];
     const extraLines = [];
     let inExtra = true;
@@ -224,20 +258,21 @@ export const StepEditorMethods = {
       if (line.startsWith('# desc:')) { desc = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# platform:')) { platform = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# project_id:')) { projectId = line.split(':')[1].trim(); continue; }
-      if (line.trim() === '# --step--') {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('# --step--')) {
         if (inStep && stepBuf.length) {
-          steps.push(this._parseStepCode(stepBuf.join('\n'), stepMeta));
-          stepBuf = []; stepMeta = null;
+          const s = this._parseStepCode(stepBuf.join('\n'));
+          if (remark) s.remark = remark;
+          steps.push(s);
+          stepBuf = []; remark = '';
         }
         inStep = true; inExtra = false;
+        // Extract remark from the same line, e.g. "# --step-- 备注内容"
+        remark = trimmed.slice('# --step--'.length).trim();
         continue;
       }
       if (inStep) {
         const t = line.trim();
-        if (t.startsWith('# @step ')) {
-          try { stepMeta = JSON.parse(t.slice('# @step '.length)); } catch (e) { stepMeta = null; }
-          continue;
-        }
         if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
           stepBuf.push(line);
         }
@@ -248,7 +283,9 @@ export const StepEditorMethods = {
       }
     }
     if (inStep && stepBuf.length) {
-      steps.push(this._parseStepCode(stepBuf.join('\n'), stepMeta));
+      const s = this._parseStepCode(stepBuf.join('\n'));
+      if (remark) s.remark = remark;
+      steps.push(s);
     }
     this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform; this.projectId = projectId;
     this.steps = steps; this._extraLines = extraLines;
@@ -264,37 +301,11 @@ export const StepEditorMethods = {
     y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
     if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
     this.steps.forEach(s => {
-      y += '\n# --step--\n';
-      const meta = this._stepMeta(s);
-      if (meta) y += '# @step ' + JSON.stringify(meta) + '\n';
+      const sep = s.remark ? `# --step-- ${s.remark}` : '# --step--';
+      y += `\n${sep}\n`;
       y += s.code + '\n';
     });
     return y;
-  },
-
-  _stepMeta(s) {
-    if (s.stepType === 'element') {
-      return {
-        stepType: 'element',
-        elementAction: s.elementAction,
-        selector: s.selector || {},
-        elementParams: s.elementParams || {}
-      };
-    }
-    if (s._type === 'imglocate') {
-      return {
-        stepType: 'imglocate',
-        action: s.action,
-        image_filename: s.image_filename,
-        grid_h: s.grid_h || 1,
-        grid_v: s.grid_v || 1,
-        click_col: s.click_col || 0,
-        click_row: s.click_row || 0,
-        timeout: s.timeout || 10,
-        threshold: s.threshold || null
-      };
-    }
-    return null;
   },
 
   taskToYamlSingle(i) {
@@ -350,7 +361,7 @@ export const StepEditorMethods = {
     }
     const code = this.stepToCode(action, value);
     const idx = this.steps.length;
-    this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+    this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
     this.ensureFile();
     this.selectStep(idx);
     if (this.autoRun) this.runSingleStep(idx);
@@ -446,6 +457,12 @@ export const StepEditorMethods = {
     else if (type === 'down' && i < this.steps.length - 1) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectStep(i + 1); this.ensureFile(); }
     else if (type === 'edit') { this.cliText = this.steps[i].code; this.cliPrefix = ''; this.selectStep(i); this.$nextTick(() => this.$refs.cliInput.focus()); }
     else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.ensureFile(); this.selectedNode = null; }
+    else if (type === 'copy') { this.copyStep(i); }
+  },
+
+  copyStep(i) {
+    const code = this.steps[i].code || '';
+    this.copyToClipboard(code);
   },
 
   selectStep(i) {
@@ -547,7 +564,7 @@ export const StepEditorMethods = {
       this.saveCurrentTask();
     } else {
       idx = this.steps.length;
-      this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+      this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
       this.saveCurrentTask();
     }
     this.selectedNode = null;

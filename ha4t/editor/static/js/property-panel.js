@@ -68,6 +68,13 @@ export const PropertyPanelMethods = {
     const type = this.computedStepType();
     const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
+    // Handle remark (common to all step types)
+    if (field === 'remark') {
+      step.remark = value;
+      this._dirtyStep();
+      return;
+    }
+
     if (type === 'element') {
       this._updateElementField(field, value);
       return;

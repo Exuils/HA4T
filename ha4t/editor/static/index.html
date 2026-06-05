@@ -278,6 +278,11 @@
                                 <el-input type="textarea" :value="selectedStep.code" @input="v => updateStepField('code', v)" :rows="5" class="prop-textarea"></el-input>
                             </div>
                         </template>
+                        <!-- Remark (通用备注) -->
+                        <div class="prop-row">
+                            <label class="prop-label">备注</label>
+                            <el-input :value="selectedStep.remark || ''" @input="v => updateStepField('remark', v)" size="small" class="prop-input-wide" placeholder="添加备注..."></el-input>
+                        </div>
                     </div>
                 </template>
                 <!-- Empty state -->
@@ -348,7 +353,8 @@
                             </div>
                             <div v-for="(s, i) in steps" :key="i"
                                 :class="['step-row', s._type === 'imglocate' ? 'step-img' : '', { 'step-selected': selectedStepIndex === i }]"
-                                @click="selectStep(i)">
+                                @click="selectStep(i)" style="position:relative">
+                                <div v-if="s.remark" class="step-remark-badge" :title="s.remark">{{ s.remark }}</div>
                                 <!-- Regular step -->
                                 <template v-if="s._type !== 'imglocate'">
                                     <span class="step-icon" :class="stepIcon(s._status).cls">
@@ -361,6 +367,7 @@
                                         <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
                                         <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
                                         <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
+                                        <button class="sb" @click.stop="stepAction('copy', i)" title="复制代码">C</button>
                                         <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
                                     </div>
                                     <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>
@@ -390,6 +397,7 @@
                                                 <button class="sb" @click.stop="stepAction('run', i)" title="执行">&#9654;</button>
                                                 <button class="sb" @click.stop="stepAction('up', i)" :disabled="i === 0" title="上移">&#8593;</button>
                                                 <button class="sb" @click.stop="stepAction('down', i)" :disabled="i === steps.length - 1" title="下移">&#8595;</button>
+                                                <button class="sb" @click.stop="stepAction('copy', i)" title="复制代码">C</button>
                                                 <button class="sb sb-del" @click.stop="stepAction('delete', i)" title="删除">X</button>
                                             </div>
                                             <div class="step-detail" v-if="s._detail">{{ s._detail }}</div>

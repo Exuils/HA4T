@@ -288,7 +288,8 @@ export const HierarchyMethods = {
       _status: 'pending',
       _detail: '',
       _duration: null,
-      _imageSaved: false
+      _imageSaved: false,
+      remark: ''
     };
     this.steps.push(step);
     this.selectStep(stepIdx);

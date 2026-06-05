@@ -682,7 +682,7 @@ def get_text(*args, **kwargs) -> str:
 
 
 @cost_time
-def assert_element(*args, operator: str = 'eq', expected=None, extract: str = 'text', **kwargs) -> bool:
+def assert_element(*args, operator: str = 'eq', expected=None, extract: str = 'text', raise_error: bool = True, **kwargs) -> bool:
     """
     元素断言
     :param args: 定位参数
@@ -695,45 +695,52 @@ def assert_element(*args, operator: str = 'eq', expected=None, extract: str = 't
     :param extract: 断言提取方式
         - text: 获取文本后进行断言（默认）
         - exists: 判断元素存在性
+    :param raise_error: 断言失败时是否抛出 AssertionError，默认 True
     :param kwargs: u2/wda属性定位
     :return: 断言是否通过
+    :raises AssertionError: 当断言失败且 raise_error=True 时抛出
     
     :Example:
         >>> assert_element(text="登录", operator="eq", expected="登录")  # 文本等于
         >>> assert_element(text="提示", operator="contains", expected="成功")  # 文本包含
         >>> assert_element(text="加载中", operator="exists", extract="exists")  # 判断存在
         >>> assert_element(text="加载中", operator="not_empty", extract="text")  # 文本不为空
+        >>> assert_element(text="加载中", operator="eq", expected="完成", raise_error=False)  # 不抛异常
     """
     import re
     
     if extract == 'exists':
         exists_result = _exists(*args, **kwargs)
         if operator == 'exists_true':
-            return exists_result
+            result = exists_result
         elif operator == 'exists_false':
-            return not exists_result
+            result = not exists_result
         else:
-            return exists_result if operator == 'eq' else not exists_result
-
-    # text mode
-    actual = get_text(*args, **kwargs)
-    
-    if operator == 'eq':
-        return actual == expected
-    elif operator == 'ne':
-        return actual != expected
-    elif operator == 'contains':
-        return expected in actual
-    elif operator == 'not_contains':
-        return expected not in actual
-    elif operator == 'empty':
-        return not actual
-    elif operator == 'not_empty':
-        return bool(actual)
-    elif operator == 'regex':
-        return bool(re.search(expected, actual))
+            result = exists_result if operator == 'eq' else not exists_result
     else:
-        raise ValueError(f"不支持的断言算子: {operator}")
+        actual = get_text(*args, **kwargs)
+        
+        if operator == 'eq':
+            result = actual == expected
+        elif operator == 'ne':
+            result = actual != expected
+        elif operator == 'contains':
+            result = expected in actual
+        elif operator == 'not_contains':
+            result = expected not in actual
+        elif operator == 'empty':
+            result = not actual
+        elif operator == 'not_empty':
+            result = bool(actual)
+        elif operator == 'regex':
+            result = bool(re.search(expected, actual))
+        else:
+            raise ValueError(f"不支持的断言算子: {operator}")
+    
+    if not result and raise_error:
+        raise AssertionError(f"断言失败: operator={operator}, expected={expected}, actual={get_text(*args, **kwargs) if extract == 'text' else 'exists=' + str(_exists(*args, **kwargs))}")
+    
+    return result
 
 
 if __name__ == '__main__':
