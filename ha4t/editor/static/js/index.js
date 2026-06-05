@@ -75,6 +75,9 @@ new Vue({
       // Swipe record state
       swipeRecordMode: false,
       swipePoints: [],
+
+      // Element select mode
+      elementSelectMode: false,
     };
   },
   computed: {

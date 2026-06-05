@@ -102,13 +102,104 @@
                 <template v-else-if="selectedStep">
                     <div class="center-header">
                         <p class="region-title">步骤属性</p>
-                        <span class="step-type-badge" v-if="stepConfig">{{ { imglocate: '图片定位', tap: '点击', swipe: '滑动', type: '输入', key: '按键', launchapp: '启动', wait: '等待', code: '代码' }[stepConfig.type] || stepConfig.type }}</span>
+                        <span class="step-type-badge" v-if="stepConfig">{{ { element: '元素操作', imglocate: '图片定位', tap: '点击', swipe: '滑动', type: '输入', key: '按键', launchapp: '启动', wait: '等待', code: '代码' }[stepConfig.type] || stepConfig.type }}</span>
                     </div>
                     <div class="step-props" v-if="stepConfig">
                         <div class="prop-row">
                             <label class="prop-label">代码</label>
                             <code class="prop-code-readonly">{{ selectedStep.code }}</code>
                         </div>
+                        <!-- Element (元素操作) -->
+                        <template v-if="stepConfig.type === 'element'">
+                            <div class="prop-section">
+                                <div class="prop-section-title">选择器</div>
+                                <div class="prop-row" v-for="(val, key) in stepConfig.fields.selector" :key="key">
+                                    <label class="prop-label">{{ {text:'文本', resourceId:'资源ID', className:'类型', xpath:'XPath', description:'描述', index:'索引'}[key] || key }}</label>
+                                    <el-input v-if="key !== 'index'" :value="val" @input="v => _updateElementField('selector.' + key, v)" size="small" placeholder="" class="prop-input-wide"></el-input>
+                                    <el-input-number v-else :value="val" @input="v => _updateElementField('selector.' + key, v)" :min="0" size="small"></el-input-number>
+                                    <el-button size="mini" @click="_removeSelectorField(key)" icon="el-icon-close" v-if="!['text','resourceId','className'].includes(key)"></el-button>
+                                </div>
+                            </div>
+                            <div class="prop-section">
+                                <div class="prop-section-title">操作</div>
+                                <div class="prop-row">
+                                    <el-select :value="stepConfig.fields.elementAction" @input="v => _updateElementField('elementAction', v)" size="small" style="width:100%">
+                                        <el-option label="点击 (click)" value="click"></el-option>
+                                        <el-option label="双击 (double_click)" value="double_click"></el-option>
+                                        <el-option label="长按 (long_press)" value="long_press"></el-option>
+                                        <el-option label="拖动偏移 (drag)" value="drag"></el-option>
+                                        <el-option label="断言 (assert)" value="assert"></el-option>
+                                    </el-select>
+                                </div>
+                            </div>
+                            <div class="prop-section" v-if="stepConfig.fields.elementAction !== 'click'">
+                                <div class="prop-section-title">操作参数</div>
+                                <!-- double_click -->
+                                <template v-if="stepConfig.fields.elementAction === 'double_click'">
+                                    <div class="prop-row">
+                                        <label class="prop-label">点击间隔</label>
+                                        <el-slider :value="stepConfig.fields.elementParams.interval || 0.05" @input="v => _updateElementField('interval', v)" :min="0.02" :max="0.5" :step="0.01" show-stops style="flex:1"></el-slider>
+                                        <span class="prop-val">{{ stepConfig.fields.elementParams.interval || 0.05 }}s</span>
+                                    </div>
+                                </template>
+                                <!-- long_press -->
+                                <template v-if="stepConfig.fields.elementAction === 'long_press'">
+                                    <div class="prop-row">
+                                        <label class="prop-label">按压时长</label>
+                                        <el-slider :value="stepConfig.fields.elementParams.duration || 1" @input="v => _updateElementField('duration', v)" :min="0.5" :max="5" :step="0.1" show-stops style="flex:1"></el-slider>
+                                        <span class="prop-val">{{ stepConfig.fields.elementParams.duration || 1 }}s</span>
+                                    </div>
+                                </template>
+                                <!-- drag -->
+                                <template v-if="stepConfig.fields.elementAction === 'drag'">
+                                    <div class="prop-row">
+                                        <label class="prop-label">X 偏移</label>
+                                        <el-input-number :value="stepConfig.fields.elementParams.dx || 0" @input="v => _updateElementField('dx', v)" :min="-500" :max="500" size="small"></el-input-number>
+                                        <span style="color:#888;font-size:12px">px</span>
+                                    </div>
+                                    <div class="prop-row">
+                                        <label class="prop-label">Y 偏移</label>
+                                        <el-input-number :value="stepConfig.fields.elementParams.dy || 0" @input="v => _updateElementField('dy', v)" :min="-500" :max="500" size="small"></el-input-number>
+                                        <span style="color:#888;font-size:12px">px</span>
+                                    </div>
+                                    <div class="prop-row">
+                                        <label class="prop-label">拖拽时长</label>
+                                        <el-slider :value="stepConfig.fields.elementParams.dragDuration || 0.5" @input="v => _updateElementField('dragDuration', v)" :min="0.1" :max="2" :step="0.1" show-stops style="flex:1"></el-slider>
+                                        <span class="prop-val">{{ stepConfig.fields.elementParams.dragDuration || 0.5 }}s</span>
+                                    </div>
+                                </template>
+                                <!-- assert -->
+                                <template v-if="stepConfig.fields.elementAction === 'assert'">
+                                    <div class="prop-row">
+                                        <label class="prop-label">断言对象</label>
+                                        <el-radio-group :value="stepConfig.fields.elementParams.extract || 'text'" @input="v => _updateElementField('extract', v)" size="small">
+                                            <el-radio-button label="text">文本</el-radio-button>
+                                            <el-radio-button label="exists">存在性</el-radio-button>
+                                        </el-radio-group>
+                                    </div>
+                                    <div class="prop-row">
+                                        <label class="prop-label">算子</label>
+                                        <el-select :value="stepConfig.fields.elementParams.operator || 'eq'" @input="v => _updateElementField('operator', v)" size="small" style="width:140px" v-if="stepConfig.fields.elementParams.extract === 'text'">
+                                            <el-option label="等于 (eq)" value="eq"></el-option>
+                                            <el-option label="不等于 (ne)" value="ne"></el-option>
+                                            <el-option label="包含 (contains)" value="contains"></el-option>
+                                            <el-option label="不包含 (not_contains)" value="not_contains"></el-option>
+                                            <el-option label="为空 (empty)" value="empty"></el-option>
+                                            <el-option label="不为空 (not_empty)" value="not_empty"></el-option>
+                                            <el-option label="正则 (regex)" value="regex"></el-option>
+                                        </el-select>
+                                        <el-select :value="stepConfig.fields.elementParams.operator || 'exists_true'" @input="v => _updateElementField('operator', v)" size="small" style="width:140px" v-else>
+                                            <el-option label="存在" value="exists_true"></el-option>
+                                            <el-option label="不存在" value="exists_false"></el-option>
+                                        </el-select>
+                                    </div>
+                                    <div class="prop-row" v-if="['eq','ne','contains','not_contains','regex'].includes(stepConfig.fields.elementParams.operator || '') && stepConfig.fields.elementParams.extract !== 'exists'">
+                                        <label class="prop-label">期望值</label>
+                                        <el-input :value="stepConfig.fields.elementParams.expected || ''" @input="v => _updateElementField('expected', v)" size="small" class="prop-input-wide"></el-input>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
                         <!-- Image locate -->
                         <template v-if="stepConfig.type === 'imglocate'">
                             <div class="img-prop-preview">

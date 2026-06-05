@@ -47,6 +47,11 @@ export const HierarchyMethods = {
     await this.fetchXpathLite(node._id);
     this.selectedNode && (this.selectedNode.xpath = this.xpathLite);
     this.renderHierarchy();
+    // If in element select mode, insert step immediately
+    if (this.elementSelectMode && this.selectedNode && this.rightTab === 'editor') {
+      this.elementSelectMode = false;
+      this.insertStepFromElement();
+    }
   },
 
   handleTreeHover(node) {
@@ -164,6 +169,11 @@ export const HierarchyMethods = {
       this.fetchXpathLite(selectedNode._id).then(() => {
         this.selectedNode && (this.selectedNode.xpath = this.xpathLite);
         this.renderHierarchy();
+        // If in element select mode, insert step immediately
+        if (this.elementSelectMode && this.selectedNode) {
+          this.elementSelectMode = false;
+          this.insertStepFromElement();
+        }
       });
     } else {
       this.selectedNode = { ...this.selectedNode };

@@ -579,5 +579,162 @@ def restart_app(app_name: Optional[str] = _CF.APP_NAME, activity: Optional[str] 
     start_app(app_name, activity)
 
 
+# ── Element-level operations ──
+
+@cost_time
+def double_click(*args, interval: float = 0.05, **kwargs) -> None:
+    """
+    双击元素，通过两次连续点击实现
+    :param args: 定位参数（同 click），支持坐标/OCR文字/图像/u2属性
+    :param interval: 两次点击间隔（秒），默认0.05
+    :param kwargs: 定位参数（同 click）
+    
+    :Example:
+        >>> double_click(text="确定")  # 双击"确定"按钮
+        >>> double_click((500, 300), interval=0.1)  # 双击坐标点
+    """
+    click(*args, **kwargs)
+    time.sleep(interval)
+    click(*args, **kwargs)
+
+
+@cost_time
+def long_press(*args, duration: float = 1.0, **kwargs) -> None:
+    """
+    长按元素
+    :param args: 定位参数（同 click）
+    :param duration: 按压持续时间（秒），默认1.0
+    :param kwargs: 定位参数（同 click）
+    
+    :Example:
+        >>> long_press(text="图标", duration=2.0)  # 长按图标2秒
+    """
+    click(*args, duration=duration, **kwargs)
+
+
+def _get_element_center(**kwargs) -> tuple:
+    """获取元素中心坐标（辅助函数）"""
+    if _CF.PLATFORM == "ios":
+        el = device.driver(**kwargs)
+        rect = el.bounds
+        return (int(rect.origin.x + rect.size.width / 2),
+                int(rect.origin.y + rect.size.height / 2))
+    elif _CF.PLATFORM == "harmony":
+        raise NotImplementedError("Harmony暂不支持元素坐标定位")
+    else:
+        el = device.driver(**kwargs)
+        return el.center()
+
+
+@cost_time
+def drag(*args, dx: int = 0, dy: int = 0, duration: float = 0.5, **kwargs) -> None:
+    """
+    拖拽元素（从元素位置偏移dx, dy）
+    仅支持通过 u2/wda 属性定位的元素（kwargs方式）
+    
+    :param args: 暂不支持通过args定位的拖拽
+    :param dx: X轴偏移像素（正数向右）
+    :param dy: Y轴偏移像素（正数向下）
+    :param duration: 拖拽持续时间（秒）
+    :param kwargs: u2/wda属性定位
+    
+    :Example:
+        >>> drag(text="滑块", dx=200, dy=0)  # 将滑块向右拖动200像素
+    """
+    if not kwargs:
+        raise ValueError("drag() 需要元素定位参数（如 text=, resourceId= 等）")
+    center = _get_element_center(**kwargs)
+    end_x = center[0] + dx
+    end_y = center[1] + dy
+    device.driver.swipe(center[0], center[1], end_x, end_y, duration=duration)
+
+
+@cost_time
+def get_text(*args, **kwargs) -> str:
+    """
+    获取元素的文本内容（用于断言前的值提取）
+    :param args: 定位参数
+    :param kwargs: u2/wda属性定位
+    
+    :return: 元素的文本字符串
+    
+    :Example:
+        >>> get_text(text="用户名")  # 获取元素的文本
+    """
+    if kwargs:
+        if _CF.PLATFORM == "android":
+            try:
+                return device.driver(**kwargs).get_text(timeout=3)
+            except Exception:
+                return ""
+        elif _CF.PLATFORM == "ios":
+            try:
+                el = device.driver(**kwargs)
+                return el.text or el.value or ""
+            except Exception:
+                return ""
+        else:
+            return ""
+    elif args:
+        if isinstance(args[0], str):
+            return args[0]
+    return ""
+
+
+@cost_time
+def assert_element(*args, operator: str = 'eq', expected=None, extract: str = 'text', **kwargs) -> bool:
+    """
+    元素断言
+    :param args: 定位参数
+    :param operator: 算子
+        - eq / ne: 文本等于/不等于期望值
+        - contains / not_contains: 文本包含/不包含
+        - empty / not_empty: 文本为空/不为空
+        - regex: 正则匹配
+    :param expected: 期望值（eq/ne/contains/not_contains/regex 时需要）
+    :param extract: 断言提取方式
+        - text: 获取文本后进行断言（默认）
+        - exists: 判断元素存在性
+    :param kwargs: u2/wda属性定位
+    :return: 断言是否通过
+    
+    :Example:
+        >>> assert_element(text="登录", operator="eq", expected="登录")  # 文本等于
+        >>> assert_element(text="提示", operator="contains", expected="成功")  # 文本包含
+        >>> assert_element(text="加载中", operator="exists", extract="exists")  # 判断存在
+        >>> assert_element(text="加载中", operator="not_empty", extract="text")  # 文本不为空
+    """
+    import re
+    
+    if extract == 'exists':
+        exists_result = _exists(*args, **kwargs)
+        if operator == 'exists_true':
+            return exists_result
+        elif operator == 'exists_false':
+            return not exists_result
+        else:
+            return exists_result if operator == 'eq' else not exists_result
+
+    # text mode
+    actual = get_text(*args, **kwargs)
+    
+    if operator == 'eq':
+        return actual == expected
+    elif operator == 'ne':
+        return actual != expected
+    elif operator == 'contains':
+        return expected in actual
+    elif operator == 'not_contains':
+        return expected not in actual
+    elif operator == 'empty':
+        return not actual
+    elif operator == 'not_empty':
+        return bool(actual)
+    elif operator == 'regex':
+        return bool(re.search(expected, actual))
+    else:
+        raise ValueError(f"不支持的断言算子: {operator}")
+
+
 if __name__ == '__main__':
     pass

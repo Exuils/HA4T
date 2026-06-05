@@ -3,6 +3,7 @@ export const PropertyPanelMethods = {
     const s = this.selectedStep;
     if (!s) return null;
     const c = s.code;
+    if (s.stepType === 'element') return 'element';
     if (s._type === 'imglocate') return 'imglocate';
     if (/^swipe\(/.test(c)) return 'swipe';
     if (/^click\(/.test(c)) return 'tap';
@@ -19,6 +20,9 @@ export const PropertyPanelMethods = {
     const config = { type: this.computedStepType(), fields: {} };
     const c = s.code;
     switch (config.type) {
+      case 'element':
+        config.fields = this._elementFields();
+        break;
       case 'imglocate':
         config.fields = this._imgFields();
         break;
@@ -64,6 +68,11 @@ export const PropertyPanelMethods = {
     const type = this.computedStepType();
     const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
+    if (type === 'element') {
+      this._updateElementField(field, value);
+      return;
+    }
+
     if (type === 'imglocate') {
       this._updateImgField(field, value);
       return;
@@ -87,7 +96,7 @@ export const PropertyPanelMethods = {
         step.code = `key("${esc(value)}")`;
         break;
       case 'launchapp':
-        step.code = `launchapp("${esc(value)}")`;
+        step.code = `start_app("${esc(value)}")`;
         break;
       case 'wait':
         step.code = `sleep(${value})`;
@@ -97,6 +106,100 @@ export const PropertyPanelMethods = {
         break;
     }
     this._dirtyStep();
+  },
+
+  // ── Element step helpers ──
+
+  _elementFields() {
+    const s = this.selectedStep;
+    if (!s) return {};
+    return {
+      stepType: 'element',
+      elementAction: s.elementAction || 'click',
+      selector: s.selector || {},
+      elementParams: s.elementParams || {},
+    };
+  },
+
+  _updateElementField(field, value) {
+    const step = this.selectedStep;
+    if (!step) return;
+
+    // Handle selector.subfield format
+    if (field.startsWith('selector.')) {
+      const subKey = field.slice(9);
+      if (!step.selector) step.selector = {};
+      step.selector[subKey] = value;
+      if (!value) delete step.selector[subKey];
+    }
+    // Handle elementAction
+    else if (field === 'elementAction') {
+      step.elementAction = value;
+      if (!step.elementParams) step.elementParams = {};
+    }
+    // Handle param.subfield format
+    else if (field.startsWith('param.')) {
+      const subKey = field.slice(6);
+      if (!step.elementParams) step.elementParams = {};
+      step.elementParams[subKey] = value;
+    }
+    // Handle action parameter fields directly
+    else if (['interval', 'duration', 'dx', 'dy', 'dragDuration', 'operator', 'expected', 'extract'].includes(field)) {
+      if (!step.elementParams) step.elementParams = {};
+      step.elementParams[field] = value;
+    }
+
+    // Regenerate code
+    if (this._generateElementCode) {
+      step.code = this._generateElementCode(step);
+    } else {
+      step.code = this.generateElementCodeSimple(step);
+    }
+    this._dirtyStep();
+  },
+
+  generateElementCodeSimple(step) {
+    const sel = this._buildSelectorStringSimple(step.selector);
+    const p = step.elementParams || {};
+    switch (step.elementAction) {
+      case 'click':
+        return sel ? `click(${sel})` : `click()`;
+      case 'double_click':
+        return `double_click(${sel}, interval=${p.interval || 0.05})`;
+      case 'long_press':
+        return `long_press(${sel}, duration=${p.duration || 1.0})`;
+      case 'drag':
+        return `drag(${sel}, dx=${p.dx || 0}, dy=${p.dy || 0}, duration=${p.dragDuration || 0.5})`;
+      case 'assert': {
+        if (p.extract === 'exists') {
+          return `assert_element(${sel}, operator="${p.operator || 'exists_true'}")`;
+        }
+        const exp = p.expected ? `, expected="${p.expected}"` : '';
+        return `assert_element(${sel}, operator="${p.operator || 'eq'}"${exp})`;
+      }
+      default:
+        return `click(${sel})`;
+    }
+  },
+
+  _buildSelectorStringSimple(selector) {
+    if (!selector) return '';
+    const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+    const parts = [];
+    if (selector.text) parts.push(`text="${esc(selector.text)}"`);
+    if (selector.resourceId) parts.push(`resourceId="${esc(selector.resourceId)}"`);
+    if (selector.className) parts.push(`className="${esc(selector.className)}"`);
+    if (selector.xpath) parts.push(`xpath="${esc(selector.xpath)}"`);
+    if (selector.description) parts.push(`description="${esc(selector.description)}"`);
+    if (selector.index != null && selector.index >= 0) parts.push(`index=${selector.index}`);
+    return parts.join(', ');
+  },
+
+  _removeSelectorField(key) {
+    const step = this.selectedStep;
+    if (!step || !step.selector) return;
+    delete step.selector[key];
+    this._updateElementField('code', '');
   },
 
   // ── Image step helpers ──

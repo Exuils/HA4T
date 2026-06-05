@@ -3,7 +3,7 @@ import { listTasks, getTask, saveTask, listPackages, cleanupImages, saveImage, g
 import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
-  { action: 'tap', desc: '点击元素 (uiautomator2)' },
+  { action: 'element', desc: '元素操作 (点击/长按/断言)' },
   { action: 'swipe', desc: '录制滑动手势 (比例坐标)' },
   { action: 'type', desc: '输入文本' },
   { action: 'key', desc: '系统按键' },
@@ -153,7 +153,38 @@ export const StepEditorMethods = {
 
   // ── Steps parsing ──
 
-  _parseStepCode(code) {
+  _parseStepCode(code, stepMeta) {
+    // If metadata is provided, use it to restore structured step
+    if (stepMeta) {
+      if (stepMeta.stepType === 'element') {
+        const s = {
+          code,
+          stepType: 'element',
+          elementAction: stepMeta.elementAction || 'click',
+          selector: stepMeta.selector || {},
+          elementParams: stepMeta.elementParams || {},
+          _status: 'pending', _detail: '', _duration: null
+        };
+        return s;
+      }
+      if (stepMeta.stepType === 'imglocate') {
+        const s = {
+          code,
+          _type: 'imglocate',
+          action: stepMeta.action || 'click',
+          image_filename: stepMeta.image_filename,
+          image: null,
+          grid_h: stepMeta.grid_h || 1,
+          grid_v: stepMeta.grid_v || 1,
+          click_col: stepMeta.click_col || 0,
+          click_row: stepMeta.click_row || 0,
+          timeout: stepMeta.timeout || 10,
+          threshold: stepMeta.threshold || null,
+          _status: 'pending', _detail: '', _duration: null
+        };
+        return s;
+      }
+    }
     const s = { code, _status: 'pending', _detail: '', _duration: null };
     const imgMatch = code.match(/image=["']([^"']+)["']/);
     if (!imgMatch) return s;
@@ -184,7 +215,7 @@ export const StepEditorMethods = {
 
   parseYamlToTask(content) {
     const lines = content.split('\n');
-    let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [];
+    let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [], stepMeta = null;
     const steps = [];
     const extraLines = [];
     let inExtra = true;
@@ -195,14 +226,18 @@ export const StepEditorMethods = {
       if (line.startsWith('# project_id:')) { projectId = line.split(':')[1].trim(); continue; }
       if (line.trim() === '# --step--') {
         if (inStep && stepBuf.length) {
-          steps.push(this._parseStepCode(stepBuf.join('\n')));
-          stepBuf = [];
+          steps.push(this._parseStepCode(stepBuf.join('\n'), stepMeta));
+          stepBuf = []; stepMeta = null;
         }
         inStep = true; inExtra = false;
         continue;
       }
       if (inStep) {
         const t = line.trim();
+        if (t.startsWith('# @step ')) {
+          try { stepMeta = JSON.parse(t.slice('# @step '.length)); } catch (e) { stepMeta = null; }
+          continue;
+        }
         if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
           stepBuf.push(line);
         }
@@ -213,7 +248,7 @@ export const StepEditorMethods = {
       }
     }
     if (inStep && stepBuf.length) {
-      steps.push(this._parseStepCode(stepBuf.join('\n')));
+      steps.push(this._parseStepCode(stepBuf.join('\n'), stepMeta));
     }
     this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform; this.projectId = projectId;
     this.steps = steps; this._extraLines = extraLines;
@@ -225,18 +260,48 @@ export const StepEditorMethods = {
     y += `# platform: ${this.taskPlatform}\n`;
     if (this.projectId) y += `# project_id: ${this.projectId}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
-    y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
+    y += 'from ha4t import connect\nfrom ha4t.api import *\n';
+    y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
     if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
     this.steps.forEach(s => {
-      y += '\n# --step--\n' + s.code + '\n';
+      y += '\n# --step--\n';
+      const meta = this._stepMeta(s);
+      if (meta) y += '# @step ' + JSON.stringify(meta) + '\n';
+      y += s.code + '\n';
     });
     return y;
+  },
+
+  _stepMeta(s) {
+    if (s.stepType === 'element') {
+      return {
+        stepType: 'element',
+        elementAction: s.elementAction,
+        selector: s.selector || {},
+        elementParams: s.elementParams || {}
+      };
+    }
+    if (s._type === 'imglocate') {
+      return {
+        stepType: 'imglocate',
+        action: s.action,
+        image_filename: s.image_filename,
+        grid_h: s.grid_h || 1,
+        grid_v: s.grid_v || 1,
+        click_col: s.click_col || 0,
+        click_row: s.click_row || 0,
+        timeout: s.timeout || 10,
+        threshold: s.threshold || null
+      };
+    }
+    return null;
   },
 
   taskToYamlSingle(i) {
     let y = `# name: ${this.taskName}\n# platform: ${this.taskPlatform}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
-    y += 'from ha4t import connect\nfrom ha4t.api import *\nconnect(platform="' + this.taskPlatform + '")\n\n';
+    y += 'from ha4t import connect\nfrom ha4t.api import *\n';
+    y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
     y += '# --step--\n' + this.steps[i].code + '\n';
     return y;
   },
@@ -278,6 +343,11 @@ export const StepEditorMethods = {
       this.enterSwipeRecordMode();
       return;
     }
+    if (action === 'element') {
+      this.$message({ message: '请在截图中点击选择一个 UI 元素', type: 'info', duration: 3000 });
+      this.elementSelectMode = true;
+      return;
+    }
     const code = this.stepToCode(action, value);
     const idx = this.steps.length;
     this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
@@ -289,16 +359,85 @@ export const StepEditorMethods = {
   stepToCode(action, value) {
     if (action === 'imglocate') return '# 图片定位 - 等待配置';
     if (action === 'swipe') return '# 滑动 - 请在截图上录制起点和终点';
+    if (action === 'element') {
+      // Create a placeholder element step - code will be generated when selector is filled
+      return this._generateElementCode({
+        stepType: 'element',
+        elementAction: 'click',
+        selector: { text: value || '' },
+        elementParams: {}
+      });
+    }
     const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     const m = {
       tap: `click(text="${esc(value)}")`,
       drag: `swipe((300, 300), (300, 700))`,
       type: `type("${esc(value)}")`,
       key: `key("${esc(value)}")`,
-      launchapp: `launchapp("${esc(value)}")`,
+      launchapp: `start_app("${esc(value)}")`,
       wait: `sleep(${value})`,
     };
     return m[action] || esc(value);
+  },
+
+  // ── Element step helpers ──
+
+  _buildSelectorString(selector) {
+    if (!selector) return '';
+    const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+    const parts = [];
+    if (selector.text) parts.push(`text="${esc(selector.text)}"`);
+    if (selector.resourceId) parts.push(`resourceId="${esc(selector.resourceId)}"`);
+    if (selector.className) parts.push(`className="${esc(selector.className)}"`);
+    if (selector.xpath) parts.push(`xpath="${esc(selector.xpath)}"`);
+    if (selector.description) parts.push(`description="${esc(selector.description)}"`);
+    if (selector.index != null && selector.index >= 0) parts.push(`index=${selector.index}`);
+    return parts.join(', ');
+  },
+
+  _generateElementCode(step) {
+    const { selector, elementAction, elementParams } = step;
+    const sel = this._buildSelectorString(selector);
+    const p = elementParams || {};
+
+    switch (elementAction) {
+      case 'click':
+        return sel ? `click(${sel})` : `click()`;
+      case 'double_click':
+        return `double_click(${sel}, interval=${p.interval || 0.05})`;
+      case 'long_press':
+        return `long_press(${sel}, duration=${p.duration || 1.0})`;
+      case 'drag':
+        return `drag(${sel}, dx=${p.dx || 0}, dy=${p.dy || 0}, duration=${p.dragDuration || 0.5})`;
+      case 'assert': {
+        if (p.extract === 'exists') {
+          return `assert_element(${sel}, operator="${p.operator || 'exists_true'}")`;
+        }
+        const exp = p.expected ? `, expected="${p.expected}"` : '';
+        return `assert_element(${sel}, operator="${p.operator || 'eq'}"${exp})`;
+      }
+      default:
+        return `click(${sel})`;
+    }
+  },
+
+  _elementFromNode(node) {
+    const selector = {};
+    if (node.text) selector.text = node.text;
+    if (node.resourceId) selector.resourceId = node.resourceId;
+    if (node._type) selector.className = node._type;
+    if (node.xpath) selector.xpath = node.xpath;
+    if (node.description) selector.description = node.description;
+    if (node.index !== undefined && node.index !== null && node.index >= 0) selector.index = node.index;
+    const step = {
+      stepType: 'element',
+      selector,
+      elementAction: 'click',
+      elementParams: {},
+      _status: 'pending', _detail: '', _duration: null
+    };
+    step.code = this._generateElementCode(step);
+    return step;
   },
 
   stepAction(type, i) {
@@ -335,6 +474,7 @@ export const StepEditorMethods = {
       if (this.cliPrefix) { this.cliPrefix = ''; this.cliText = ''; }
       if (this.captureMode) { this.exitCaptureMode(); }
       if (this.swipeRecordMode) { this.exitSwipeRecordMode(); this.$message({ message: '已取消滑动录制', type: 'info' }); }
+      if (this.elementSelectMode) { this.elementSelectMode = false; this.$message({ message: '已取消元素选择', type: 'info' }); }
     }
   },
 
@@ -381,6 +521,24 @@ export const StepEditorMethods = {
       return;
     }
 
+    // Handle element: prefix - create element step
+    if (action === 'element') {
+      const step = {
+        stepType: 'element',
+        elementAction: 'click',
+        selector: { text: value || '' },
+        elementParams: {},
+        code: this._generateElementCode({ stepType: 'element', elementAction: 'click', selector: { text: value || '' }, elementParams: {} }),
+        _status: 'pending', _detail: '', _duration: null
+      };
+      this.steps.push(step);
+      this.ensureFile();
+      this.selectStep(this.steps.length - 1);
+      this.cliText = ''; this.cliPrefix = ''; this.slashVisible = false;
+      if (this.autoRun) this.runSingleStep(this.steps.length - 1);
+      return;
+    }
+
     const code = this.stepToCode(action, value);
     let idx = this.selectedStepIndex;
     if (idx >= 0 && idx < this.steps.length) {
@@ -416,6 +574,10 @@ export const StepEditorMethods = {
     }
     if (item.action === 'swipe') {
       this.addStep('swipe', ''); this.slashVisible = false; this.cliText = ''; this.cliPrefix = '';
+      return;
+    }
+    if (item.action === 'element') {
+      this.addStep('element', ''); this.slashVisible = false; this.cliText = ''; this.cliPrefix = '';
       return;
     }
     this.cliPrefix = item.action;
@@ -597,17 +759,12 @@ export const StepEditorMethods = {
       this.$message({ message: '切换到编辑器标签页后再插入步骤', type: 'info' });
       return;
     }
-    const sel = this.generateU2Selector(this.selectedNode);
-    if (!sel) {
-      this.$message({ message: '该元素无可用选择器', type: 'warning' });
-      return;
-    }
-    const code = `click(${sel})`;
+    const step = this._elementFromNode(this.selectedNode);
     const idx = this.steps.length;
-    this.steps.push({ code, _status: 'pending', _detail: '', _duration: null });
+    this.steps.push(step);
     this.ensureFile();
     this.selectStep(idx);
-    this.$message({ message: `已插入: ${code}`, type: 'success' });
+    this.$message({ message: `已插入元素操作: ${step.code}`, type: 'success' });
     if (this.autoRun) this.runSingleStep(idx);
   },
 };
