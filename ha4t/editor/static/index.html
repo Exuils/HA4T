@@ -102,7 +102,7 @@
                 <template v-else-if="selectedStep">
                     <div class="center-header">
                         <p class="region-title">步骤属性</p>
-                        <span class="step-type-badge" v-if="stepConfig">{{ stepConfig.type }}</span>
+                        <span class="step-type-badge" v-if="stepConfig">{{ { imglocate: '图片定位', tap: '点击', swipe: '滑动', type: '输入', key: '按键', launchapp: '启动', wait: '等待', code: '代码' }[stepConfig.type] || stepConfig.type }}</span>
                     </div>
                     <div class="step-props" v-if="stepConfig">
                         <div class="prop-row">
@@ -281,16 +281,18 @@
                                             <img :src="s.image" alt="模板图片" />
                                         </div>
                                         <div class="img-step-info">
-                                            <div class="img-step-title">
-                                                <span class="step-icon" :class="stepIcon(s._status).cls">{{ stepIcon(s._status).icon }}</span>
-                                                <span class="step-num">{{ i + 1 }}.</span>
-                                                <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
-                                            </div>
-                                            <div class="img-step-params">
-                                                <span v-if="s.action === 'click'">网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
-                                                <span v-if="s.action === 'click'">点击: 第{{ s.click_col + 1 }}列, 第{{ s.click_row + 1 }}行</span>
-                                                <span>超时: {{ s.timeout }}s</span>
-                                                <span v-if="s.threshold">阈值: {{ s.threshold }}</span>
+                                            <div class="img-step-meta">
+                                                <div class="img-step-title">
+                                                    <span class="step-icon" :class="stepIcon(s._status).cls">{{ stepIcon(s._status).icon }}</span>
+                                                    <span class="step-num">{{ i + 1 }}.</span>
+                                                    <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
+                                                </div>
+                                                <div class="img-step-params">
+                                                    <span v-if="s.action === 'click'">网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
+                                                    <span v-if="s.action === 'click'">点击: 第{{ s.click_col + 1 }}列, 第{{ s.click_row + 1 }}行</span>
+                                                    <span>超时: {{ s.timeout }}s</span>
+                                                    <span v-if="s.threshold">阈值: {{ s.threshold }}</span>
+                                                </div>
                                             </div>
                                             <div class="step-dur" v-if="s._duration">{{ s._duration }}s</div>
                                             <div class="img-step-btns">

@@ -572,7 +572,7 @@ export const StepEditorMethods = {
     if (!this.isConnected) return;
     if (this.rightTab !== 'editor') return;
     const idx = this.steps.length;
-    this.steps.push({ code: `device.driver.press("${key}")`, _status: 'pending', _detail: '', _duration: null });
+    this.steps.push({ code: `key("${key}")`, _status: 'pending', _detail: '', _duration: null });
     this.ensureFile();
     this.addLog('info', `已插入: press("${key}")`);
     if (this.autoRun) this.runSingleStep(idx);
