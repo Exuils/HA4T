@@ -59,6 +59,9 @@ const KEY_OPTIONS = [
   { key: 'ctrl_right', desc: '右 Ctrl 键' },
 ];
 
+// Expose to template for property panel
+window._KEY_OPTIONS = KEY_OPTIONS;
+
 export const StepEditorMethods = {
   // ── File operations ──
 
@@ -345,7 +348,33 @@ export const StepEditorMethods = {
 
   // ── Step management ──
 
+  pushUndo() {
+    if (!this.steps) return;
+    this.undoStack.push(JSON.parse(JSON.stringify(this.steps)));
+    if (this.undoStack.length > this.undoDepthMax) this.undoStack.shift();
+    this.redoStack = [];
+  },
+
+  undo() {
+    if (this.undoStack.length === 0) return;
+    this.redoStack.push(JSON.parse(JSON.stringify(this.steps)));
+    this.steps = this.undoStack.pop();
+    this.selectedStepIndex = -1;
+    this.selectedNode = null;
+    this.ensureFile();
+  },
+
+  redo() {
+    if (this.redoStack.length === 0) return;
+    this.undoStack.push(JSON.parse(JSON.stringify(this.steps)));
+    this.steps = this.redoStack.pop();
+    this.selectedStepIndex = -1;
+    this.selectedNode = null;
+    this.ensureFile();
+  },
+
   addStep(action, value) {
+    this.pushUndo();
     if (action === 'imglocate') {
       this.enterCaptureMode();
       return;
@@ -453,10 +482,10 @@ export const StepEditorMethods = {
 
   stepAction(type, i) {
     if (type === 'run') this.runSingleStep(i);
-    else if (type === 'up' && i > 0) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i - 1, 0, s); this.selectStep(i - 1); this.ensureFile(); }
-    else if (type === 'down' && i < this.steps.length - 1) { const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectStep(i + 1); this.ensureFile(); }
+    else if (type === 'up' && i > 0) { this.pushUndo(); const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i - 1, 0, s); this.selectStep(i - 1); this.ensureFile(); }
+    else if (type === 'down' && i < this.steps.length - 1) { this.pushUndo(); const s = this.steps[i]; this.steps.splice(i, 1); this.steps.splice(i + 1, 0, s); this.selectStep(i + 1); this.ensureFile(); }
     else if (type === 'edit') { this.cliText = this.steps[i].code; this.cliPrefix = ''; this.selectStep(i); this.$nextTick(() => this.$refs.cliInput.focus()); }
-    else if (type === 'delete') { this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.ensureFile(); this.selectedNode = null; }
+    else if (type === 'delete') { this.pushUndo(); this.steps.splice(i, 1); if (this.selectedStepIndex >= this.steps.length) this.selectedStepIndex = this.steps.length - 1; this.ensureFile(); this.selectedNode = null; }
     else if (type === 'copy') { this.copyStep(i); }
   },
 
@@ -557,6 +586,7 @@ export const StepEditorMethods = {
     }
 
     const code = this.stepToCode(action, value);
+    this.pushUndo();
     let idx = this.selectedStepIndex;
     if (idx >= 0 && idx < this.steps.length) {
       this.steps[idx].code = code;
@@ -750,6 +780,7 @@ export const StepEditorMethods = {
   async deviceAction(key) {
     if (!this.isConnected) return;
     if (this.rightTab !== 'editor') return;
+    this.pushUndo();
     const idx = this.steps.length;
     this.steps.push({ code: `key("${key}")`, _status: 'pending', _detail: '', _duration: null });
     this.ensureFile();
@@ -776,6 +807,7 @@ export const StepEditorMethods = {
       this.$message({ message: '切换到编辑器标签页后再插入步骤', type: 'info' });
       return;
     }
+    this.pushUndo();
     const step = this._elementFromNode(this.selectedNode);
     const idx = this.steps.length;
     this.steps.push(step);

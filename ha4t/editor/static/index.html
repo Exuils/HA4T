@@ -258,11 +258,29 @@
                                 <el-input :value="stepConfig.fields.selector" @input="v => updateStepField('selector', v)" size="small" placeholder='text="..."' class="prop-input-wide"></el-input>
                             </div>
                         </template>
-                        <!-- Type / Key / LaunchApp -->
-                        <template v-if="['type','key','launchapp'].includes(stepConfig.type)">
+                        <!-- Type -->
+                        <template v-if="stepConfig.type === 'type'">
                             <div class="prop-row">
-                                <label class="prop-label">{{ {type:'文本', key:'按键', launchapp:'包名'}[stepConfig.type] }}</label>
-                                <el-input :value="Object.values(stepConfig.fields)[0] || ''" @input="v => updateStepField(stepConfig.type, v)" size="small" class="prop-input-wide"></el-input>
+                                <label class="prop-label">文本</label>
+                                <el-input :value="stepConfig.fields.text || ''" @input="v => updateStepField('type', v)" size="small" class="prop-input-wide"></el-input>
+                            </div>
+                        </template>
+                        <!-- Key (下拉 + 自定义) -->
+                        <template v-if="stepConfig.type === 'key'">
+                            <div class="prop-row">
+                                <label class="prop-label">按键</label>
+                                <el-select :value="stepConfig.fields.key || ''" @input="v => updateStepField('key', v)" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入按键...">
+                                    <el-option v-for="opt in keyOptions" :key="opt.key" :label="opt.key + ' (' + opt.desc + ')'" :value="opt.key"></el-option>
+                                </el-select>
+                            </div>
+                        </template>
+                        <!-- LaunchApp (下拉 + 自定义) -->
+                        <template v-if="stepConfig.type === 'launchapp'">
+                            <div class="prop-row">
+                                <label class="prop-label">包名</label>
+                                <el-select :value="stepConfig.fields.package || ''" @input="v => updateStepField('launchapp', v)" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
+                                    <el-option v-for="pkg in appsCache" :key="pkg" :label="pkg" :value="pkg"></el-option>
+                                </el-select>
                             </div>
                         </template>
                         <!-- Wait -->

@@ -315,7 +315,7 @@ export const PropertyPanelMethods = {
 
   _dirtyStep() {
     const i = this.selectedStepIndex;
-    if (i >= 0) this.$set(this.steps, i, { ...this.steps[i] });
+    if (i >= 0) { this.pushUndo(); this.$set(this.steps, i, { ...this.steps[i] }); }
     this.ensureFile();
   },
 };

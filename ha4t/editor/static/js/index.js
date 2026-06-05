@@ -78,6 +78,10 @@ new Vue({
 
       // Element select mode
       elementSelectMode: false,
+      // Undo/redo
+      undoStack: [],
+      redoStack: [],
+      undoDepthMax: 50,
     };
   },
   computed: {
@@ -100,6 +104,10 @@ new Vue({
     },
     stepConfig() {
       return this.selectedStepConfig();
+    },
+    keyOptions() {
+      // Expose KEY_OPTIONS to the template for the key property panel
+      return window._KEY_OPTIONS || [];
     },
   },
   watch: {
@@ -133,6 +141,18 @@ new Vue({
 
     this.setupCanvasResolution('#screenshotCanvas');
     this.setupCanvasResolution('#hierarchyCanvas');
+
+    // Undo/redo keyboard shortcut
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        if (e.shiftKey) { this.redo(); } else { this.undo(); }
+        e.preventDefault();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        this.redo();
+        e.preventDefault();
+      }
+    });
 
     await this.listDevice();
     if (this.serial && !this.isConnected) {
@@ -197,6 +217,7 @@ new Vue({
       const [p1, p2] = this.swipePoints;
       const code = `swipe((${p1.x.toFixed(3)}, ${p1.y.toFixed(3)}), (${p2.x.toFixed(3)}, ${p2.y.toFixed(3)}))`;
       const idx = this.steps.length;
+      this.pushUndo();
       this.steps.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
       this.ensureFile();
       this.$message({ message: `已添加滑动: ${code}`, type: 'success' });

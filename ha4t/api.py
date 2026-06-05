@@ -579,6 +579,18 @@ def restart_app(app_name: Optional[str] = _CF.APP_NAME, activity: Optional[str] 
     start_app(app_name, activity)
 
 
+@cost_time
+def key(key_name: str) -> None:
+    """
+    模拟系统按键，多端兼容
+    :param key_name: 按键名称，如 home, back, menu, volume_up 等
+    :Example:
+        >>> key("home")  # 主页键
+        >>> key("back")  # 返回键
+    """
+    device.driver.press(key_name)
+
+
 # ── Element-level operations ──
 
 @cost_time

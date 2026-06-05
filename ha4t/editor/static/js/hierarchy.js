@@ -293,6 +293,7 @@ export const HierarchyMethods = {
     };
     this.steps.push(step);
     this.selectStep(stepIdx);
+    this.pushUndo();
     saveImage(imgName, croppedBase64)
       .then(() => { step._imageSaved = true; })
       .catch((e) => { console.error('保存图片失败', e); });
