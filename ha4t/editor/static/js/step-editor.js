@@ -1,5 +1,5 @@
 ﻿import { saveToLocalStorage } from './utils.js';
-import { listTasks, getTask, saveTask, listPackages, cleanupImages, saveImage, getImage } from './api.js';
+import { listTasks, getTask, saveTask, listPackages, cleanupImages, saveImage, getImage, runAllure } from './api.js';
 import { API_HOST } from './config.js';
 
 const SLASH_STEP = [
@@ -140,6 +140,11 @@ export const StepEditorMethods = {
     this.taskDesc = '';
     this.taskPlatform = 'android';
     this.projectId = '';
+    this.taskTag = '';
+    this.taskFeature = '';
+    this.taskStory = '';
+    this.taskSeverity = 'normal';
+    this.taskRerun = 0;
     this.steps = [];
     this.selectedStepIndex = -1;
   },
@@ -253,6 +258,7 @@ export const StepEditorMethods = {
   parseYamlToTask(content) {
     const lines = content.split('\n');
     let name = '', desc = '', platform = 'android', projectId = '', inStep = false, stepBuf = [], remark = '';
+    let tag = '', feature = '', story = '', severity = 'normal', rerun = 0;
     const steps = [];
     const extraLines = [];
     let inExtra = true;
@@ -261,6 +267,11 @@ export const StepEditorMethods = {
       if (line.startsWith('# desc:')) { desc = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# platform:')) { platform = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# project_id:')) { projectId = line.split(':')[1].trim(); continue; }
+      if (line.startsWith('# tag:')) { tag = line.split(':')[1].trim(); continue; }
+      if (line.startsWith('# feature:')) { feature = line.split(':')[1].trim(); continue; }
+      if (line.startsWith('# story:')) { story = line.split(':')[1].trim(); continue; }
+      if (line.startsWith('# severity:')) { severity = line.split(':')[1].trim(); continue; }
+      if (line.startsWith('# rerun:')) { rerun = parseInt(line.split(':')[1].trim()) || 0; continue; }
       const trimmed = line.trim();
       if (trimmed.startsWith('# --step--')) {
         if (inStep && stepBuf.length) {
@@ -270,7 +281,6 @@ export const StepEditorMethods = {
           stepBuf = []; remark = '';
         }
         inStep = true; inExtra = false;
-        // Extract remark from the same line, e.g. "# --step-- 备注内容"
         remark = trimmed.slice('# --step--'.length).trim();
         continue;
       }
@@ -280,7 +290,7 @@ export const StepEditorMethods = {
           stepBuf.push(line);
         }
       } else if (inExtra && line.trim()) {
-        if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:') && !line.startsWith('# project_id:')) {
+        if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:') && !line.startsWith('# project_id:') && !line.startsWith('# tag:') && !line.startsWith('# feature:') && !line.startsWith('# story:') && !line.startsWith('# severity:') && !line.startsWith('# rerun:')) {
           extraLines.push(line);
         }
       }
@@ -291,6 +301,8 @@ export const StepEditorMethods = {
       steps.push(s);
     }
     this.taskName = name; this.taskDesc = desc; this.taskPlatform = platform; this.projectId = projectId;
+    this.taskTag = tag; this.taskFeature = feature; this.taskStory = story;
+    this.taskSeverity = severity; this.taskRerun = rerun;
     this.steps = steps; this._extraLines = extraLines;
   },
 
@@ -299,6 +311,11 @@ export const StepEditorMethods = {
     if (this.taskDesc) y += `# desc: ${this.taskDesc}\n`;
     y += `# platform: ${this.taskPlatform}\n`;
     if (this.projectId) y += `# project_id: ${this.projectId}\n`;
+    if (this.taskTag) y += `# tag: ${this.taskTag}\n`;
+    if (this.taskFeature) y += `# feature: ${this.taskFeature}\n`;
+    if (this.taskStory) y += `# story: ${this.taskStory}\n`;
+    if (this.taskSeverity && this.taskSeverity !== 'normal') y += `# severity: ${this.taskSeverity}\n`;
+    if (this.taskRerun) y += `# rerun: ${this.taskRerun}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
     y += 'from ha4t import connect\nfrom ha4t.api import *\n';
     y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
@@ -656,6 +673,35 @@ export const StepEditorMethods = {
   },
 
   // ── Step execution ──
+
+  handleRunCommand(cmd) {
+    if (cmd === 'run') {
+      this.runAllSteps();
+    } else if (cmd === 'run-allure') {
+      this.runAllStepsAllure();
+    }
+  },
+
+  async runAllStepsAllure() {
+    if (!this.currentYamlFile) return;
+    this.addLog('info', '正在运行并生成 Allure 报告...');
+    try {
+      await this.saveYamlFile();
+      const res = await runAllure(this.currentYamlFile);
+      if (res.success && res.data) {
+        this.addLog('ok', `运行完成, returncode=${res.data.returncode}`);
+        if (res.data.stderr) this.addLog('warn', res.data.stderr);
+        if (res.data.report_url) {
+          this.$message({ message: 'Allure 报告已生成', type: 'success' });
+          window.open(res.data.report_url, '_blank');
+        }
+      } else {
+        this.addLog('fail', `运行失败: ${res.message}`);
+      }
+    } catch (e) {
+      this.addLog('fail', `Allure 运行错误: ${e.message}`);
+    }
+  },
 
   async runSingleStep(i) {
     if (!this.isConnected) { this.$message({ showClose: true, message: '尚未连接设备', type: 'warning' }); return; }

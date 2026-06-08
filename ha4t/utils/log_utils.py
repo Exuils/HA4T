@@ -8,9 +8,11 @@ import functools
 import logging
 import os
 import time
+from io import BytesIO
 
 import allure
 import colorlog
+import PIL.Image
 
 from ha4t.config import Config as CF
 
@@ -100,6 +102,23 @@ def log_out(msg, level=1):
         Log.error(msg)
 
 
+def _attach_screenshot(name="screenshot"):
+    """附加当前设备截图到 Allure step"""
+    try:
+        from ha4t import device
+        if device and hasattr(device, 'driver') and device.driver:
+            img = device.driver.screenshot()
+            if img:
+                if isinstance(img, PIL.Image.Image):
+                    buf = BytesIO()
+                    img.save(buf, format='PNG')
+                    allure.attach(buf.getvalue(), name=name, attachment_type=allure.attachment_type.PNG)
+                elif isinstance(img, bytes):
+                    allure.attach(img, name=name, attachment_type=allure.attachment_type.PNG)
+    except Exception:
+        pass
+
+
 def cost_time(func):
     """
     计算函数运行时间，log打印每个操作事件耗时
@@ -117,6 +136,7 @@ def cost_time(func):
                 f"动作：【{func.__name__}】-执行成功，参数：{args, *kwargs.values()}，耗时：{round(time.time() - start_time, 3)}秒")
             return result
         except Exception as e:
+            _attach_screenshot(f"{func.__name__}_失败")
             log_out(
                 f"动作：【{func.__name__}】-执行失败，参数：{args, *kwargs.values()},耗时：{round(time.time() - start_time, 3)}秒 失败原因：{e}",
                 level=2)

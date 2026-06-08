@@ -414,3 +414,90 @@ async def ws_run_task(ws: WebSocket):
         except Exception:
             pass
     await ws.close()
+
+
+ALLURE_REPORTS_DIR = Path.home() / "Documents" / "HA4T" / "allure-reports"
+
+
+@router.post("/tasks/{filename:path}/run-allure")
+async def run_task_allure(filename: str):
+    """Run task via pytest + Allure, return report URL"""
+    task_path = TASKS_DIR / filename
+    if not task_path.exists():
+        return ApiResponse.doError(f"File not found: {filename}")
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="ha4t-allure-"))
+    try:
+        run_file = tmpdir / filename
+        shutil.copy(task_path, run_file)
+
+        # Copy conftest.py to tmpdir
+        conftest_src = Path(__file__).parent.parent / "conftest.py"
+        if conftest_src.exists():
+            shutil.copy(conftest_src, tmpdir / "conftest.py")
+
+        # Copy referenced images
+        content = task_path.read_text("utf-8")
+        for line in content.split('\n'):
+            m = re.search(r'image=["\']([^"\']+)["\']', line)
+            if m:
+                img_name = m.group(1)
+                img_path = IMAGES_DIR / img_name
+                if img_path.exists():
+                    try:
+                        shutil.copy(img_path, tmpdir / img_name)
+                    except Exception:
+                        pass
+
+        # Add project root to PYTHONPATH for subprocess
+        project_root = Path(__file__).parent.parent.parent
+        env = os.environ.copy()
+        env.setdefault("PYTHONPATH", "")
+        paths = [str(project_root), str(project_root.parent)]
+        existing = env["PYTHONPATH"].split(os.pathsep) if env["PYTHONPATH"] else []
+        for p in paths:
+            if p not in existing:
+                existing.insert(0, p)
+        env["PYTHONPATH"] = os.pathsep.join(existing)
+
+        # Run pytest
+        result_dir = tmpdir / "allure-results"
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", str(run_file),
+             "--alluredir", str(result_dir), "--clean-alluredir",
+             "-v", "--tb=short"],
+            cwd=str(tmpdir), capture_output=True, text=True, env=env
+        )
+
+        # Generate report
+        report_dir = tmpdir / "allure-report"
+        allure_cmd = shutil.which("allure")
+        report_url = ""
+        if allure_cmd:
+            subprocess.run(
+                [allure_cmd, "generate", str(result_dir),
+                 "-o", str(report_dir), "--clean"],
+                capture_output=True, cwd=str(tmpdir)
+            )
+            report_index = report_dir / "index.html"
+            if report_index.exists():
+                safe_name = filename.replace('.py', '').replace('/', '_').replace('\\', '_')
+                out_dir = ALLURE_REPORTS_DIR / safe_name
+                shutil.rmtree(out_dir, ignore_errors=True)
+                shutil.copytree(report_dir, out_dir)
+                report_url = f"/allure-reports/{safe_name}/index.html"
+
+        return ApiResponse.doSuccess({
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+            "report_url": report_url,
+            "result_dir": str(result_dir),
+        })
+    except Exception as e:
+        return ApiResponse.doError(str(e))
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass

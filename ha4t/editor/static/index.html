@@ -6,7 +6,7 @@
     <title>UI 层级查看器</title>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" type="text/css" href="/static/cdn/unpkg.com/element-theme-dark@1.0.2/lib/index.css">
-    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=2">
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v=3">
     <script src="/static/cdn/tailwindcss.js"></script>
 
 </head>
@@ -348,9 +348,15 @@
                             <el-tooltip content="打开文件夹" placement="top">
                                 <el-button size="small" @click="openTasksFolder" icon="el-icon-document"></el-button>
                             </el-tooltip>
-                            <el-tooltip content="全部运行" placement="top">
-                                <el-button size="small" type="success" @click="runAllSteps" :disabled="!isConnected || !steps.length" icon="el-icon-circle-check"></el-button>
-                            </el-tooltip>
+                            <el-dropdown @command="handleRunCommand" :disabled="!isConnected || !steps.length" trigger="click">
+                                <el-button size="small" type="success" icon="el-icon-circle-check">
+                                    全部运行<el-icon class="el-icon-arrow-down el-icon--right"></el-icon>
+                                </el-button>
+                                <el-dropdown-menu slot="dropdown">
+                                    <el-dropdown-item command="run">运行</el-dropdown-item>
+                                    <el-dropdown-item command="run-allure">运行 + Allure 报告</el-dropdown-item>
+                                </el-dropdown-menu>
+                            </el-dropdown>
                             <el-tooltip content="清理未引用图片" placement="top">
                                 <el-button size="small" @click="cleanupTaskImages" :disabled="!projectId" icon="el-icon-delete"></el-button>
                             </el-tooltip>
@@ -452,7 +458,7 @@
                             </div>
                         </div>
                     </el-tab-pane>
-                    <el-dialog title="用例设置" :visible.sync="settingsVisible" width="420px" top="15vh">
+                    <el-dialog title="用例设置" :visible.sync="settingsVisible" width="520px" top="10vh">
                         <el-form label-width="80px" size="small">
                             <el-form-item label="名称">
                                 <el-input v-model="taskName"></el-input>
@@ -467,6 +473,29 @@
                                     <el-option label="HarmonyOS" value="harmony"></el-option>
                                 </el-select>
                             </el-form-item>
+                            <el-divider></el-divider>
+                            <p style="color:#8492a6;font-size:12px;margin:0 0 8px 0">Allure / pytest 元数据（可选）</p>
+                            <el-form-item label="标签">
+                                <el-input v-model="taskTag" placeholder="逗号分隔，如 smoke, login"></el-input>
+                            </el-form-item>
+                            <el-form-item label="Feature">
+                                <el-input v-model="taskFeature" placeholder="Allure Feature"></el-input>
+                            </el-form-item>
+                            <el-form-item label="Story">
+                                <el-input v-model="taskStory" placeholder="Allure Story"></el-input>
+                            </el-form-item>
+                            <el-form-item label="严重级别">
+                                <el-select v-model="taskSeverity" style="width:100%">
+                                    <el-option label="Blocker" value="blocker"></el-option>
+                                    <el-option label="Critical" value="critical"></el-option>
+                                    <el-option label="Normal" value="normal"></el-option>
+                                    <el-option label="Minor" value="minor"></el-option>
+                                    <el-option label="Trivial" value="trivial"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item label="失败重试">
+                                <el-input-number v-model="taskRerun" :min="0" :max="5"></el-input-number>
+                            </el-form-item>
                         </el-form>
                         <span slot="footer">
                             <el-button @click="settingsVisible = false" size="small">取消</el-button>
@@ -479,6 +508,6 @@
     <script src="/static/cdn/code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/static/cdn/cdn.jsdelivr.net/npm/vue@2"></script>
     <script src="/static/cdn/unpkg.com/element-ui/lib/index.js"></script>
-    <script type="module" src="/static/js/index.js?v=2"></script>
+    <script type="module" src="/static/js/index.js?v=3"></script>
 </body>
 </html>

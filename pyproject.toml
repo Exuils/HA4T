@@ -52,6 +52,14 @@ dependencies = [
     "pydantic>=2",
 ]
 
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+testpaths = []
+markers = [
+    "smoke: smoke test marker",
+    "login: login test marker",
+]
+
 [project.optional-dependencies]
 dev = [
     "flake8",

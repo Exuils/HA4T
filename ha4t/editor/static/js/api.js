@@ -138,3 +138,10 @@ export async function cleanupImages(filename) {
   });
   return checkResponse(response);
 }
+
+export async function runAllure(filename) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/run-allure`, {
+    method: 'POST'
+  });
+  return checkResponse(response);
+}
