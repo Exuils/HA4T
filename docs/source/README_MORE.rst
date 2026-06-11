@@ -27,26 +27,25 @@ You can also install it from Git repository.
 ------------
 .. code-block:: python
 
-    # 原生定位
     from ha4t import connect
-    from ha4t.api import *
+    from ha4t.aircv.cv import Template
 
-    connect(platform="android")
+    # 连接设备
+    dev = connect(platform="android")
 
     # 启动应用
-    start_app(activity="com.xxx.xxx.MainActivity",app_name="com.xxx.xxx")
+    dev.start_app(activity="com.xxx.xxx.MainActivity", app_name="com.xxx.xxx")
 
-    # 等待
-    wait(text="添加新项目",timeout=30)
+    # 等待 OCR 文字出现
+    dev.wait("添加新项目", timeout=30)
 
-    # orc 文字识别定位 中/英
-    click("添加新项目")
+    # OCR 文字识别定位点击
+    dev.click("添加新项目")
     # 图像匹配定位
-    click(image = "./添加新项目.png")
-    from ha4t.aircv.cv import Template
-    click(Template("./添加新项目.png"))
-    # u2 元素定位
-    click(text="添加新项目")
+    dev.click(image="./添加新项目.png")
+    dev.click(Template("./添加新项目.png"))
+    # u2/wda 元素定位
+    dev.click(text="添加新项目")
 
 
     # webview 定位
@@ -55,10 +54,8 @@ You can also install it from Git repository.
     from ha4t.cdp.by import By
 
     cdp_server = CdpServer()
-    cdp_server.start_server_for_android_app(device.driver.adb_device)
+    cdp_server.start_server_for_android_app(dev.driver.adb_device)
     cdp = CDP(cdp_server.ws_endpoint)
 
-
     window = cdp.get_page(["homePage"])
-    time.sleep(3)
     window.click((By.TEXT, "新建项目"))

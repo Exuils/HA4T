@@ -24,44 +24,67 @@ pip install ha4t
 
 ## 快速开始
 
-以下是一个简单的示例，展示如何使用HA4T进行基本操作：
+### 面向对象风格（推荐）
 
 ```python
-
-# 原生定位
 from ha4t import connect
-from ha4t.api import *
-
-connect(platform="android")
-
-# 启动应用
-start_app(activity="com.xxx.xxx.MainActivity", app_name="com.xxx.xxx")
-
-# 等待
-wait(text="添加新项目", timeout=30)
-
-# orc 文字识别定位 中/英
-click("添加新项目")
-# 图像匹配定位
-click(image="./添加新项目.png")
 from ha4t.aircv.cv import Template
 
-click(Template("./添加新项目.png"))
-# u2 元素定位
-click(text="添加新项目")
+# 连接设备，返回 Device 实例
+dev = connect(platform="android", device_serial="emulator-5554",
+              android_package_name="com.xxx.xxx",
+              android_activity_name="com.xxx.xxx.MainActivity")
 
-# webview 定位
+# 启动应用
+dev.start_app()
+
+# 等待 OCR 文字出现
+dev.wait("添加新项目", timeout=30)
+
+# OCR 文字识别定位点击
+dev.click("添加新项目")
+
+# 图像匹配点击
+dev.click(image="./添加新项目.png")
+dev.click(Template("./添加新项目.png"))
+
+# u2/wda 原生属性定位
+dev.click(text="添加新项目")
+
+# 滑动
+dev.swipe_up()
+dev.swipe((0.2, 0.5), (0.8, 0.5), duration=0.5)
+
+# WebView（CDP）
 from ha4t.cdp.cdp import CDP
 from ha4t.cdp.server import CdpServer
 from ha4t.cdp.by import By
 
 cdp_server = CdpServer()
-cdp_server.start_server_for_android_app(device.driver.adb_device)
+cdp_server.start_server_for_android_app(dev.driver.adb_device)
 cdp = CDP(cdp_server.ws_endpoint)
-
 window = cdp.get_page(["homePage"])
-time.sleep(3)
 window.click((By.TEXT, "新建项目"))
+```
+
+
+### 多设备并行
+
+```python
+from ha4t import connect
+import threading
+
+dev1 = connect(platform="android", device_serial="device1")
+dev2 = connect(platform="android", device_serial="device2")
+
+def run(dev):
+    dev.click("登录")
+    dev.wait("首页")
+
+t1 = threading.Thread(target=run, args=(dev1,))
+t2 = threading.Thread(target=run, args=(dev2,))
+t1.start(); t2.start()
+t1.join(); t2.join()
 ```
 
 ## 详细文档(未完善)

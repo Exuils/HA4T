@@ -11,6 +11,7 @@ HA4T pytest 集成 conftest
 """
 import ast
 import os
+import re
 import sys
 import types
 from pathlib import Path
@@ -89,7 +90,7 @@ def _split_preamble_and_steps(content: str):
 
 def _strip_connect_call(preamble_lines):
     """
-    从前置代码中移除 connect() 调用行。
+    从前置代码中移除 connect() 调用行（含赋值形式 dev = connect(...)）。
     返回 (filtered_preamble, connect_kwargs)
     connect() 改为由 session fixture 执行。
     """
@@ -97,11 +98,25 @@ def _strip_connect_call(preamble_lines):
     connect_kwargs = {}
     for line in preamble_lines:
         stripped = line.strip()
+        # 裸调用形式：connect(...)
         if stripped.startswith('connect('):
             try:
                 start = stripped.index('(')
                 end = stripped.rindex(')')
                 args_str = stripped[start+1:end]
+                for part in args_str.split(','):
+                    part = part.strip()
+                    if '=' in part:
+                        k, v = part.split('=', 1)
+                        connect_kwargs[k.strip()] = v.strip().strip('"').strip("'")
+            except ValueError:
+                pass
+            continue
+        # 赋值形式：xxx = connect(...)
+        m = re.match(r'^(\w+)\s*=\s*connect\((.*)\)\s*$', stripped)
+        if m:
+            try:
+                args_str = m.group(2)
                 for part in args_str.split(','):
                     part = part.strip()
                     if '=' in part:
@@ -179,6 +194,8 @@ class StepFile(pytest.Module):
                 allure.dynamic.title(f"Step {idx}: {remark}")
 
             # 执行步骤代码
+            # 注入 session fixture 的 Device 实例，供步骤体中的 dev.xxx() 使用
+            mod.__dict__['dev'] = device_connect
             compiled = compile(code, f'{self.path.stem}:{fn_name}', 'exec')
             exec(compiled, mod.__dict__)
 
@@ -214,17 +231,14 @@ class StepFile(pytest.Module):
 def device_connect(request):
     """
     设备连接 fixture (session 级别)
-    所有测试用例共享同一个设备连接
+    所有测试用例共享同一个设备连接，返回 Device 实例。
     """
     platform = request.config.getoption("--ha4t-platform", default="android")
     serial = request.config.getoption("--ha4t-serial", default=None)
 
     from ha4t import connect
-    connect(platform=platform, device_serial=serial)
-
-    # 返回 device 供测试使用
-    from ha4t import device as ha4t_device
-    return ha4t_device
+    dev = connect(platform=platform, device_serial=serial)
+    return dev
 
 
 def pytest_addoption(parser):

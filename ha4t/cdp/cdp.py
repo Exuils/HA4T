@@ -51,7 +51,7 @@ import requests
 import websockets
 
 from ha4t.cdp.jsCode import Jscript
-from ha4t.config import Config as CF
+from ha4t.config import global_config
 from ha4t.utils.log_utils import log_out, cost_time
 
 # js 获取及拼接工具类
@@ -141,8 +141,9 @@ def _worker(url, task_queue, result_queue):
         client = _WS_CDP(url)
         try:
             await client.connect()
-        except Exception as e:
+        except (websockets.exceptions.ConnectionClosed, OSError) as e:
             result_queue.put(e)
+            return
         while True:
             try:
                 task = task_queue.get(block=True)
@@ -151,7 +152,12 @@ def _worker(url, task_queue, result_queue):
                 method, params = task
                 result = await client.send_command(method, params)
                 result_queue.put(result)
+            except (websockets.exceptions.WebSocketException, asyncio.TimeoutError) as e:
+                # 已知的连接/超时类异常
+                result_queue.put(e)
+                break
             except Exception as e:
+                # 兜底：其余未预期异常同样回传给主线程，避免 worker 静默卡死
                 result_queue.put(e)
                 break
         await client.close()
@@ -236,7 +242,7 @@ class Page:
         except Exception as e:
             raise e
 
-    def get_element(self, locator: tuple, timeout=CF.FIND_TIMEOUT) -> 'Element':
+    def get_element(self, locator: tuple, timeout=None) -> 'Element':
         """
         获取页面元素并返回 Element 实例。
         :param locator: 元素定位器，格式为元组，例如 ("css selector", "#element_id")
@@ -247,7 +253,7 @@ class Page:
             >>> element = Page().get_element(("css selector", "#element_id"))
         
         """
-        element_id = self._find_element_id(locator, timeout)
+        element_id = self._find_element_id(locator, timeout if timeout is not None else global_config.find_timeout)
         return Element(self, element_id)
 
     def _find_element_id(self, locator: tuple, timeout: int) -> str:
@@ -289,7 +295,7 @@ class Page:
         script = JS.element_exists(locator=locator)
         return self.execute_script(script)
 
-    def wait(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
+    def wait(self, locator: tuple, timeout=None):
         """
         等待元素出现。
 
@@ -299,12 +305,13 @@ class Page:
         :Example:
             >>> Page().wait(("css selector", "#element_id"))
         """
+        _timeout = timeout if timeout is not None else global_config.find_timeout
         t1 = time.time()
         while True:
             try:
                 if self.exist(locator):
                     break
-                if time.time() - t1 > timeout:
+                if time.time() - t1 > _timeout:
                     raise ValueError(f"元素定位超时：{locator}")
                 time.sleep(0.1)
             except Exception as e:
@@ -327,7 +334,7 @@ class Page:
         return img
 
     @cost_time
-    def click(self, locator: tuple, timeout=CF.FIND_TIMEOUT):
+    def click(self, locator: tuple, timeout=None):
         """
         点击元素。
 
@@ -385,7 +392,6 @@ class CDP:
         :Example:
             >>> page = CDP().get_page("页面标题")
         """
-        e = None
         t1 = time.time()
         while True:
             try:
@@ -404,11 +410,12 @@ class CDP:
             # 请求错误
             except requests.exceptions.RequestException as e:
                 raise e
-            except Exception as e:
-                log_out(e, 2)
-                pass
+            except (KeyError, IndexError) as e:
+                log_out(f"解析页面列表失败：{e}", 2)
+            
             if time.time() - t1 > timeout:
-                raise ValueError(f"获取页面超时")
+                raise TimeoutError(f"获取页面超时, ws_title={ws_title}")
+            time.sleep(0.5)
 
     def get_page_list(self) -> list:
         """
@@ -438,152 +445,87 @@ class Element:
     def click(self):
         """
         点击元素。
+
         :Example:
-            >>> Element.click()
+            >>> Element().click()
         """
-        self._page.execute_script(JS.add_click(self._id))
+        script = JS.add_click(element_var_name=self._id)
+        self._page.execute_script(script)
 
-    def exists(self) -> bool:
+    def get_text(self):
         """
-        判断元素是否存在。
+        获取元素的文本内容。
 
-        :return: 如果元素存在返回 True，否则返回 False
+        :return: 元素的文本内容
         :Example:
-            >>> is_exist = Element.exists()
+            >>> text = Element().get_text()
         """
-        return self._page.execute_script(f"{self._id} != null")
+        script = JS.get_text(element_var_name=self._id)
+        return self._page.execute_script(script)
 
-    def is_displayed(self) -> bool:
+    def get_value(self):
         """
-        判断元素是否可见。
+        获取元素的值。
 
-        :return: 如果元素可见返回 True，否则返回 False
+        :return: 元素的值
         :Example:
-            >>> visible = Element.is_displayed()
+            >>> value = Element().get_value()
         """
-        return self._page.execute_script(f"{self._id}.style.display != 'none'")
+        script = JS.get_value(element_var_name=self._id)
+        return self._page.execute_script(script)
 
-    def is_enabled(self) -> bool:
+    def set_value(self, value):
         """
-        判断元素是否可用。
-
-        :return: 如果元素可用返回 True，否则返回 False
-        :Example:
-            >>> enabled = Element.is_enabled()
-        """
-        return self._page.execute_script(f"{self._id}.disabled == false")
-
-    def wait_util_enabled(self, timeout=10):
-        """
-        等待元素可用。
-
-        :param timeout: 超时时间，默认为 10 秒
-        :raises ValueError: 如果超时
-        :Example:
-            >>> Element.wait_util_enabled()
-        """
-        t1 = time.time()
-        while True:
-            if self.is_enabled():
-                break
-            if time.time() - t1 > timeout:
-                raise ValueError(f"元素未启用：{self._id}")
-            time.sleep(0.1)
-
-    def is_selected(self) -> bool:
-        """
-        判断元素是否被选中。
-
-        :return: 如果元素被选中返回 True，否则返回 False
-        :Example:
-            >>> selected = Element.is_selected()
-        """
-        return self._page.execute_script(f"{self._id}.selected == true")
-
-    def get_text(self) -> str:
-        """
-        获取元素文本。
-
-        :return: 元素文本
-        :Example:
-            >>> text = Element.get_text()
-        """
-        return self._page.execute_script(f"{self._id}.textContent")
-
-    def set_text(self, text: str):
-        """
-        设置元素文本。
-
-        :param text: 要设置的文本
-        :Example:
-            >>> Element.set_text("新文本")
-        """
-        self._page.execute_script(f"{self._id}.value='{text}'")
-
-    def get_attribute(self, attribute: str) -> Any:
-        """
-        获取元素属性。
-
-        :param attribute: 属性名
-        :return: 属性值
-        :Example:
-            >>> value = Element.get_attribute("class")
-        """
-        return self._page.execute_script(f"{self._id}.{attribute}")
-
-    def set_attribute(self, attribute: str, value: Any):
-        """
-        设置元素属性。
-
-        :param attribute: 属性名
-        :param value: 属性值
-        :Example:
-            >>> Element.set_attribute("class", "new-class")
-        """
-        self._page.execute_script(f"{self._id}.{attribute}='{value}'")
-
-    def get_property(self, prop: str) -> Any:
-        """
-        获取元素属性值。
-
-        :param prop: 属性名
-        :return: 属性值
-        :Example:
-            >>> value = Element.get_property("value")
-        """
-        return self._page.execute_script(f"{self._id}.{prop}")
-
-    def set_property(self, prop: str, value: Any):
-        """
-        设置元素属性值。
-
-        :param prop: 属性名
-        :param value: 属性值
-        :Example:
-            >>> Element.set_property("value", "新值")
-        """
-        self._page.execute_script(f"{self._id}.{prop}='{value}'")
-
-    def get_value(self) -> Any:
-        """
-        获取元素值。
-
-        :return: 元素值
-        :Example:
-            >>> value = Element.get_value()
-        """
-        return self._page.execute_script(f"{self._id}.value")
-
-    def set_value(self, value: Any):
-        """
-        设置元素值。
+        设置元素的值。
 
         :param value: 要设置的值
         :Example:
-            >>> Element.set_value("新值")
+            >>> Element().set_value("value")
         """
-        self._page.execute_script(f"{self._id}.value='{value}'")
+        script = JS.set_value(element_var_name=self._id, value=value)
+        self._page.execute_script(script)
 
+    def get_attribute(self, attribute):
+        """
+        获取元素的属性。
 
-if __name__ == '__main__':
-    pass
+        :param attribute: 属性名
+        :return: 属性值
+        :Example:
+            >>> attribute_value = Element().get_attribute("attribute_name")
+        """
+        script = JS.get_attribute(element_var_name=self._id, attribute_name=attribute)
+        return self._page.execute_script(script)
+
+    def set_attribute(self, attribute, value):
+        """
+        设置元素的属性。
+
+        :param attribute: 属性名
+        :param value: 属性值
+        :Example:
+            >>> Element().set_attribute("attribute_name", "attribute_value")
+        """
+        script = JS.set_attribute(element_var_name=self._id, attribute_name=attribute, value=value)
+        self._page.execute_script(script)
+
+    def scroll_to(self):
+        """
+        滚动到元素。
+
+        :Example:
+            >>> Element().scroll_to()
+        """
+        script = JS.scroll_to(element_var_name=self._id)
+        self._page.execute_script(script)
+
+    def get_location(self):
+        """
+        获取元素在页面上的位置。
+
+        :return: 包含 x, y, width, height 的字典
+        :Example:
+            >>> location = Element().get_location()
+        """
+        script = JS.get_location(element_var_name=self._id)
+        return self._page.execute_script(script)

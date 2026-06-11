@@ -50,6 +50,7 @@ dependencies = [
     "hmdriver2",
     "pyyaml",
     "pydantic>=2",
+    "hdc-installer",
 ]
 
 [tool.pytest.ini_options]

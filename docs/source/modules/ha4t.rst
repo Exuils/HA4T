@@ -17,7 +17,6 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   ha4t.api
    ha4t.config
    ha4t.orc
 

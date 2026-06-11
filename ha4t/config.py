@@ -1,44 +1,56 @@
 # -*- coding: utf-8 -*-
-# @时间       : 2024/10/10 16:54
-# @作者       : caishilong
-# @文件名      : config.py
-# @项目名      : HA4T
-# @软件       : PyCharm
 """
-配置文件，用于存放全局变量
+配置模块
+
+- DeviceConfig: 每个 Device 实例持有一份，存放设备级运行时状态。
+- GlobalConfig: 进程级单例，存放与具体设备无关的全局配置（日志、图像识别参数等）。
+- Config: 向下兼容的全局单例（含全部字段，供旧代码直接使用）。
 """
+import os
 
 
-class Config:
-    """# 全局变量**"""
-    """**手动配置项**"""
-    """测试"""
-    AUTHER = 'caishilong'
-    """执行平台（ios/android）"""
-    PLATFORM = 'android'
-    """指定设备序列号，默认不选，多设备时可指定"""
-    DEVICE_SERIAL = None
-    """缩放比例"""
-    SCREEN_WIDTH = 1
-    SCREEN_HEIGHT = 1
-    """Android包名"""
-    ANDROID_PACKAGE_NAME = ''
-    """Android活动名"""
-    ANDROID_ACTIVITY_NAME = ''
-    """iOS包名"""
-    IOS_BUNDLE_ID = ''
-    """图像识别阈值"""
-    CV_THRESHOLD = 0.6
-    """查找图片超时时间"""
-    FIND_TIMEOUT = 5
+class DeviceConfig:
+    """设备级运行时状态，每个 Device 实例持有一份独立拷贝。"""
 
-    SAVE_LOG = False
-    LOG_PATH = 'log'
+    def __init__(self):
+        self.platform: str = 'android'          # ios / android / harmony
+        self.device_serial: str = ''
+        self.screen_width: int = 0
+        self.screen_height: int = 0
+        self.app_name: str = ''
+        self.android_package_name: str = ''
+        self.android_activity_name: str = ''
+        self.ios_bundle_id: str = ''
+        self.device_name: str = ''
 
-    """**动态配置，由代码自动生成**"""
-    """设备名称"""
-    DEVICE_NAME = ''
-    """应用名（动态）"""
-    APP_NAME = ANDROID_PACKAGE_NAME if PLATFORM.lower() == 'android' else IOS_BUNDLE_ID
-    """动态路径引用，用于图像识别切换路径（动态）"""
-    CURRENT_PATH = ""
+    @property
+    def screen_size(self):
+        return (self.screen_width, self.screen_height)
+
+    @screen_size.setter
+    def screen_size(self, value):
+        self.screen_width, self.screen_height = value
+
+    def resolve_app_name(self) -> str:
+        """返回有效的 app 标识：优先 app_name，其次按平台回退。"""
+        if self.app_name:
+            return self.app_name
+        if self.platform == 'android':
+            return self.android_package_name
+        return self.ios_bundle_id
+
+
+class GlobalConfig:
+    """进程级全局配置，与具体设备无关。"""
+
+    def __init__(self):
+        self.cv_threshold: float = 0.6      # 图像识别阈值
+        self.find_timeout: int = 5          # 查找元素超时（秒）
+        self.save_log: bool = False
+        self.log_path: str = 'log'
+        self.current_path: str = os.getcwd()   # 图像资源基准路径
+
+
+# 进程级单例
+global_config = GlobalConfig()
+

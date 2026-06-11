@@ -1,4 +1,4 @@
-﻿import { saveToLocalStorage } from './utils.js';
+import { saveToLocalStorage } from './utils.js';
 import { listTasks, getTask, saveTask, listPackages, cleanupImages, saveImage, getImage, runAllure } from './api.js';
 import { API_HOST } from './config.js';
 
@@ -165,7 +165,7 @@ export const StepEditorMethods = {
     const s = { code, _status: 'pending', _detail: '', _duration: null };
     
     // Try to parse as element step from code string
-    const elMatch = code.match(/^(click|double_click|long_press|drag|assert_element)\((.*)\)$/);
+    const elMatch = code.match(/^(?:dev\.)?(click|double_click|long_press|drag|assert_element)\((.*)\)$/);
     if (elMatch) {
       const func = elMatch[1];
       const argsStr = elMatch[2];
@@ -286,11 +286,11 @@ export const StepEditorMethods = {
       }
       if (inStep) {
         const t = line.trim();
-        if (t && !t.startsWith('#') && !t.startsWith('from ha4t') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ')) {
+        if (t && !t.startsWith('#') && !t.startsWith('from ') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ') && !/^\w+\s*=\s*connect\(/.test(t)) {
           stepBuf.push(line);
         }
       } else if (inExtra && line.trim()) {
-        if (!line.startsWith('from ha4t') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:') && !line.startsWith('# project_id:') && !line.startsWith('# tag:') && !line.startsWith('# feature:') && !line.startsWith('# story:') && !line.startsWith('# severity:') && !line.startsWith('# rerun:')) {
+        if (!line.startsWith('from ') && !line.startsWith('connect(') && !line.startsWith('import ') && !line.startsWith('os.environ') && !/^\w+\s*=\s*connect\(/.test(line.trim()) && !line.startsWith('# name:') && !line.startsWith('# desc:') && !line.startsWith('# platform:') && !line.startsWith('# project_id:') && !line.startsWith('# tag:') && !line.startsWith('# feature:') && !line.startsWith('# story:') && !line.startsWith('# severity:') && !line.startsWith('# rerun:')) {
           extraLines.push(line);
         }
       }
@@ -317,8 +317,8 @@ export const StepEditorMethods = {
     if (this.taskSeverity && this.taskSeverity !== 'normal') y += `# severity: ${this.taskSeverity}\n`;
     if (this.taskRerun) y += `# rerun: ${this.taskRerun}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
-    y += 'from ha4t import connect\nfrom ha4t.api import *\n';
-    y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
+    y += 'from ha4t import connect\nfrom time import sleep\n';
+    y += `dev = connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
     if (this._extraLines) this._extraLines.forEach(l => { y += l + '\n'; });
     this.steps.forEach(s => {
       const sep = s.remark ? `# --step-- ${s.remark}` : '# --step--';
@@ -331,8 +331,8 @@ export const StepEditorMethods = {
   taskToYamlSingle(i) {
     let y = `# name: ${this.taskName}\n# platform: ${this.taskPlatform}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
-    y += 'from ha4t import connect\nfrom ha4t.api import *\n';
-    y += `connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
+    y += 'from ha4t import connect\nfrom time import sleep\n';
+    y += `dev = connect(platform="${this.taskPlatform}", device_serial="${this.serial}")\n\n`;
     y += '# --step--\n' + this.steps[i].code + '\n';
     return y;
   },
@@ -427,11 +427,11 @@ export const StepEditorMethods = {
     }
     const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     const m = {
-      tap: `click(text="${esc(value)}")`,
-      drag: `swipe((300, 300), (300, 700))`,
+      tap: `dev.click(text="${esc(value)}")`,
+      drag: `dev.swipe((300, 300), (300, 700))`,
       type: `type("${esc(value)}")`,
-      key: `key("${esc(value)}")`,
-      launchapp: `start_app("${esc(value)}")`,
+      key: `dev.key("${esc(value)}")`,
+      launchapp: `dev.start_app("${esc(value)}")`,
       wait: `sleep(${value})`,
     };
     return m[action] || esc(value);
@@ -459,22 +459,22 @@ export const StepEditorMethods = {
 
     switch (elementAction) {
       case 'click':
-        return sel ? `click(${sel})` : `click()`;
+        return sel ? `dev.click(${sel})` : `dev.click()`;
       case 'double_click':
-        return `double_click(${sel}, interval=${p.interval || 0.05})`;
+        return `dev.double_click(${sel}, interval=${p.interval || 0.05})`;
       case 'long_press':
-        return `long_press(${sel}, duration=${p.duration || 1.0})`;
+        return `dev.long_press(${sel}, duration=${p.duration || 1.0})`;
       case 'drag':
-        return `drag(${sel}, dx=${p.dx || 0}, dy=${p.dy || 0}, duration=${p.dragDuration || 0.5})`;
+        return `dev.drag(${sel}, dx=${p.dx || 0}, dy=${p.dy || 0}, duration=${p.dragDuration || 0.5})`;
       case 'assert': {
         if (p.extract === 'exists') {
-          return `assert_element(${sel}, operator="${p.operator || 'exists_true'}")`;
+          return `dev.assert_element(${sel}, operator="${p.operator || 'exists_true'}")`;
         }
         const exp = p.expected ? `, expected="${p.expected}"` : '';
-        return `assert_element(${sel}, operator="${p.operator || 'eq'}"${exp})`;
+        return `dev.assert_element(${sel}, operator="${p.operator || 'eq'}"${exp})`;
       }
       default:
-        return `click(${sel})`;
+        return `dev.click(${sel})`;
     }
   },
 

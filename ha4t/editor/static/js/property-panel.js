@@ -243,14 +243,14 @@ export const PropertyPanelMethods = {
     const imgPath = step.image_filename || 'template.png';
     const t = step.threshold ? `, threshold=${step.threshold}` : '';
     if (step.action === 'click') {
-      if (step.grid_h === 1 && step.grid_v === 1) return `click(image="${imgPath}"${t})`;
-      return `click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v})${t})`;
+      if (step.grid_h === 1 && step.grid_v === 1) return `dev.click(image="${imgPath}"${t})`;
+      return `dev.click(image="${imgPath}", grid=(${step.click_col}, ${step.click_row}), splits=(${step.grid_h}, ${step.grid_v})${t})`;
     } else if (step.action === 'wait_show') {
-      return `wait(image="${imgPath}", timeout=${step.timeout}${t})`;
+      return `dev.wait(image="${imgPath}", timeout=${step.timeout}${t})`;
     } else if (step.action === 'wait_hide') {
-      return `wait(image="${imgPath}", timeout=${step.timeout}, reverse=True${t})`;
+      return `dev.wait(image="${imgPath}", timeout=${step.timeout}, reverse=True${t})`;
     }
-    return `click(image="${imgPath}"${t})`;
+    return `dev.click(image="${imgPath}"${t})`;
   },
 
   renderImgConfigGrid() {

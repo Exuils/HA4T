@@ -16,7 +16,7 @@ _original_create_predictor = _pi.create_predictor
 def _patched_create_predictor(config):
     try:
         config.disable_mkldnn()
-    except Exception:
+    except (AttributeError, RuntimeError):
         pass
     return _original_create_predictor(config)
 
@@ -25,7 +25,6 @@ _pi.create_predictor = _patched_create_predictor
 
 from paddleocr import PaddleOCR
 
-from ha4t.config import Config as CF
 from ha4t.utils.log_utils import log_out
 
 
@@ -63,12 +62,17 @@ class OCR:
         result = self._predict(img)
         return "".join(result[0]["rec_texts"])
 
-    def get_text_pos(self, text: str, record_func, index=0, timeout=10, scale=None) -> tuple:
+    def get_text_pos(self, text: str, record_func, index=0, timeout=10, scale=None, screen_size=None) -> tuple:
         """反复截图直到匹配到目标文字，返回坐标"""
+        from ha4t.exceptions import OCRTimeoutError
         t1 = time.time()
         cost = index
         while True:
-            img = record_func().resize((CF.SCREEN_WIDTH, CF.SCREEN_HEIGHT))
+            raw = record_func()
+            if screen_size and raw.size != screen_size:
+                img = raw.resize(screen_size)
+            else:
+                img = raw
             items = self.to_list(self._predict(img))
             for item in items:
                 if abs(len(item["text"]) - len(text)) <= 3:
@@ -78,4 +82,4 @@ class OCR:
                         else:
                             cost -= 1
             if time.time() - t1 > timeout:
-                raise TimeoutError("ocr查找文字超时")
+                raise OCRTimeoutError(f"OCR 查找文字 [{text}] 超时")

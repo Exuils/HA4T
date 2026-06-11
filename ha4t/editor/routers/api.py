@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 import base64
 import json
@@ -171,8 +171,8 @@ def _generate_py(name, desc, platform, step_codes, extra_lines=None):
     lines.append('import os')
     lines.append('os.environ["FLAGS_use_mkldnn"] = "0"')
     lines.append('from ha4t import connect')
-    lines.append('from ha4t.api import *')
-    lines.append('connect(platform="' + platform + '")')
+    lines.append('from time import sleep')
+    lines.append('dev = connect(platform="' + platform + '")')
     lines.append('')
     if extra_lines:
         lines.extend(extra_lines)

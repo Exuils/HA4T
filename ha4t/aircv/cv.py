@@ -14,7 +14,6 @@ import cv2
 import cv2 as cv
 import numpy as np
 from six import PY3
-from uiautomator2 import Device
 
 from ha4t.aircv.aircv import get_resolution, crop_image
 from ha4t.aircv.keypoint_matching import KAZEMatching, BRISKMatching, AKAZEMatching, ORBMatching
@@ -23,7 +22,7 @@ from ha4t.aircv.multiscale_template_matching import MultiScaleTemplateMatchingPr
 from ha4t.aircv.settings import Settings as ST
 from ha4t.aircv.template_matching import TemplateMatching
 from ha4t.aircv.transform import TargetPos
-from ha4t.config import Config as CF
+from ha4t.config import global_config as _GC
 
 MATCHING_METHODS = {
     "tpl": TemplateMatching,
@@ -53,7 +52,7 @@ class Template(object):
 
     def __init__(self, filename, threshold=None, target_pos=TargetPos.MID, record_pos=None, resolution=(), rgb=False,
                  scale_max=800, scale_step=0.005):
-        self.filename = os.path.join(CF.CURRENT_PATH, filename)
+        self.filename = os.path.join(_GC.current_path, filename)
         self._filepath = None
         self.threshold = threshold or ST.THRESHOLD
         self.target_pos = target_pos
@@ -227,7 +226,7 @@ class Predictor(object):
         return area
 
 
-def match_loop(screenshot_func: Device.screenshot, template, timeout=10, threshold=None, rgb=False,*args, **kwargs):
+def match_loop(screenshot_func, template, timeout=10, threshold=None, rgb=False, screen_size=None, *args, **kwargs):
     """
     模板匹配循环，直到匹配到一个或多个模板为止.
     :param screenshot_func: 截图函数，返回截图图片.
@@ -235,14 +234,16 @@ def match_loop(screenshot_func: Device.screenshot, template, timeout=10, thresho
     :param timeout: 超时时间，单位秒.
     :param threshold: 匹配阈值.
     :param rgb: 是否使用rgb三通道进行校验.
+    :param screen_size: 目标分辨率，截图将缩放到此尺寸.
     :return: 匹配到的模板列表.
     """
     start_time = time.time()
 
     while True:
-        source_image =screenshot_func()
-        # set * h w scale
-        source_image = np.array(source_image.resize((CF.SCREEN_WIDTH, CF.SCREEN_HEIGHT)))
+        raw = screenshot_func()
+        if screen_size and raw.size != tuple(screen_size):
+            raw = raw.resize(tuple(screen_size))
+        source_image = np.array(raw)
         pos = Template(template, rgb=rgb, threshold=threshold, *args, **kwargs).match_in(source_image)
         if pos:
             return pos

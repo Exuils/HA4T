@@ -962,7 +962,7 @@ wheels = [
 
 [[package]]
 name = "ha4t"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "adbutils" },
@@ -972,6 +972,7 @@ dependencies = [
     { name = "deepdiff" },
     { name = "facebook-wda" },
     { name = "fastapi" },
+    { name = "hdc-installer" },
     { name = "hmdriver2" },
     { name = "logging-reset" },
     { name = "logzero" },
@@ -1020,6 +1021,7 @@ requires-dist = [
     { name = "facebook-wda" },
     { name = "fastapi" },
     { name = "flake8", marker = "extra == 'dev'" },
+    { name = "hdc-installer" },
     { name = "hmdriver2" },
     { name = "isort", marker = "extra == 'dev'" },
     { name = "logging-reset" },
@@ -1050,6 +1052,18 @@ requires-dist = [
     { name = "wheel", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "hdc-installer"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e7/fd/170895d634055472b3da09b7fcf9d62537e91e5e25f5114c6a22136d464d/hdc_installer-0.1.0.tar.gz", hash = "sha256:1aea950e720efacc2f4b5ed1f35812aa687c1bd1145cf0475dd1e661ca17302a", size = 3375, upload-time = "2025-11-11T13:40:47.119Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/e7/76b91e6f1a4cdd1eaf4918ede68159012b84abc5c48934bd3ac915a85af0/hdc_installer-0.1.0-py3-none-any.whl", hash = "sha256:f6568a75979032296117e353896f07d8c6132f35920aa66c3ebe876d5b73ce74", size = 4249, upload-time = "2025-11-11T13:40:46.084Z" },
+]
 
 [[package]]
 name = "hf-xet"

@@ -43,12 +43,6 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
 
 ================================
 
-.. toctree::
-   :maxdepth: 2
-   :caption: 原生元素操作
-
-   modules/ha4t.api
-
 ================================
 
 .. toctree::

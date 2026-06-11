@@ -284,7 +284,7 @@ export const HierarchyMethods = {
       click_col: 0,
       click_row: 0,
       timeout: 10,
-      code: `click(image="${imgName}")`,
+      code: `dev.click(image="${imgName}")`,
       _status: 'pending',
       _detail: '',
       _duration: null,
