@@ -145,3 +145,16 @@ export async function runAllure(filename) {
   });
   return checkResponse(response);
 }
+export async function taskMeta(filename) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/meta`);
+  return checkResponse(response);
+}
+
+export async function reorderTask(filename, newOrder) {
+  const response = await fetch(`${API_HOST}tasks/${encodeURIComponent(filename)}/reorder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_order: newOrder })
+  });
+  return checkResponse(response);
+}

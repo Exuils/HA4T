@@ -271,6 +271,70 @@ def list_tasks():
     return ApiResponse.doSuccess(files)
 
 
+class ReorderRequest(BaseModel):
+    new_order: list[int]
+
+
+@router.get("/tasks/{filename:path}/meta", response_model=ApiResponse)
+def get_task_meta(filename: str):
+    path = TASKS_DIR / filename
+    if not path.exists():
+        return ApiResponse.doError("not found")
+    content = path.read_text(encoding="utf-8")
+    meta = _extract_meta(content)
+    steps = _parse_py_steps(content)
+    return ApiResponse.doSuccess({
+        "steps_count": len(steps),
+        "platform": meta.get("platform", "android"),
+        "name": meta.get("name", ""),
+        "desc": meta.get("desc", ""),
+        "project_id": meta.get("project_id", ""),
+    })
+
+
+@router.post("/tasks/{filename:path}/reorder", response_model=ApiResponse)
+def reorder_task_v2(filename: str, req: ReorderRequest):
+    path = TASKS_DIR / filename
+    if not path.exists():
+        return ApiResponse.doError("not found")
+    content = path.read_text(encoding="utf-8")
+    lines = content.split('\n')
+    first_step_line = -1
+    for idx, line in enumerate(lines):
+        if line.strip() == _STEP_MARKER:
+            first_step_line = idx
+            break
+    if first_step_line == -1:
+        return ApiResponse.doError("no steps found")
+    header_lines = lines[:first_step_line]
+    step_blocks = []
+    current_block = []
+    pending_remarks = []
+    in_block = False
+    for line in lines[first_step_line:]:
+        if line.strip() == _STEP_MARKER:
+            if in_block:
+                step_blocks.append(pending_remarks + [_STEP_MARKER] + current_block)
+            pending_remarks = []
+            current_block = []
+            in_block = True
+        elif in_block:
+            current_block.append(line)
+        else:
+            pending_remarks.append(line)
+    if in_block:
+        step_blocks.append(pending_remarks + [_STEP_MARKER] + current_block)
+    n = len(step_blocks)
+    if len(req.new_order) != n or any(i < 0 or i >= n for i in req.new_order):
+        return ApiResponse.doError("invalid order")
+    reordered = [step_blocks[i] for i in req.new_order]
+    new_lines = header_lines[:]
+    for block in reordered:
+        new_lines.extend(block)
+    path.write_text('\n'.join(new_lines), encoding="utf-8")
+    return ApiResponse.doSuccess({"steps_count": n, "reordered": True})
+
+
 @router.get("/tasks/{filename:path}", response_model=ApiResponse)
 def load_task(filename: str):
     path = TASKS_DIR / filename
@@ -295,6 +359,8 @@ def get_project_id(filename: str):
     content = path.read_text(encoding="utf-8")
     meta = _extract_meta(content)
     return ApiResponse.doSuccess(meta.get('project_id', ''))
+
+
 
 
 @router.post("/tasks/{filename:path}/cleanup-images", response_model=ApiResponse)
@@ -373,6 +439,49 @@ async def ws_run_task(ws: WebSocket):
                 except Exception as e:
                     await ws.send_json({"type": "log", "text": f"[runner] copy failed: {e}"})
     await ws.send_json({"type": "log", "text": f"[runner] total copied: {copied}"})
+
+    # Copy referenced included task files (ha4t.include("xxx.py")) recursively
+    # so the subprocess can find them in cwd. Also copy any images those files
+    # reference. Cycle-safe via a visited set.
+    visited: set = set()
+    pending = [content]
+    inc_copied = 0
+    while pending:
+        text = pending.pop()
+        for line in text.split('\n'):
+            m = re.search(r'\binclude\(\s*["\']([^"\']+)["\']\s*\)', line)
+            if not m:
+                continue
+            ref = m.group(1)
+            if ref in visited:
+                continue
+            visited.add(ref)
+            src = TASKS_DIR / ref
+            if not src.exists():
+                await ws.send_json({"type": "log", "text": f"[runner] include source missing: {ref}"})
+                continue
+            try:
+                shutil.copy(src, tmpdir / ref)
+                inc_copied += 1
+                await ws.send_json({"type": "log", "text": f"[runner] copied include {ref} to tmpdir"})
+                sub_text = src.read_text(encoding="utf-8")
+                pending.append(sub_text)
+                # Also copy images referenced inside the included file
+                for sub_line in sub_text.split('\n'):
+                    im = re.search(r'image=["\']([^"\']+)["\']', sub_line)
+                    if im:
+                        img_name = im.group(1)
+                        img_path = IMAGES_DIR / img_name
+                        if img_path.exists() and not (tmpdir / img_name).exists():
+                            try:
+                                shutil.copy(img_path, tmpdir / img_name)
+                                await ws.send_json({"type": "log", "text": f"[runner] copied image {img_name} (via include)"})
+                            except Exception as e:
+                                await ws.send_json({"type": "log", "text": f"[runner] copy image failed: {e}"})
+            except Exception as e:
+                await ws.send_json({"type": "log", "text": f"[runner] copy include failed: {e}"})
+    if inc_copied:
+        await ws.send_json({"type": "log", "text": f"[runner] total includes copied: {inc_copied}"})
 
     step_codes = _parse_py_steps(content)
     total = len(step_codes)

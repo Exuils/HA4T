@@ -13,46 +13,28 @@ Its features include:
 - and more…
 
 
-This project is developed using FastAPI and Vue. It starts locally and displays UI hierarchy through web browser.
+This project is developed using FastAPI + Vue 3 + Element Plus. It starts locally and displays UI hierarchy through web browser.
 
 ![show](https://github.com/user-attachments/assets/cd277443-2064-4c98-a5c9-214ee6fae674)
 
 # Installation
 - python3.8+
-
 ```shell
-pip3 install -U uiviewer
+pip install -e .
 ```
 
 # Run
 Run the following command on the terminal. (default port `8000`)
 
 ```shell
-uiviewer
-# or
-python3 -m uiviewer
-
-INFO:     Started server process [46814]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:55080 - "GET / HTTP/1.1" 307 Temporary Redirect
-INFO:     127.0.0.1:55080 - "GET /static/index.html HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55080 - "GET /static/css/style.css HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55080 - "GET /static/js/index.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55080 - "GET /static/js/api.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55082 - "GET /static/js/utils.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55082 - "GET /static/js/config.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55082 - "GET /version HTTP/1.1" 200 OK
+python -m ha4t.editor [-p PORT]
 ```
+
 And then open the browser to [http://localhost:8000](http://localhost:8000)
 
 You can also customize port to start the service.
 ```shell
-uiviewer -p <PORT>
-# or
-python3 -m uiviewer -p <PORT>
-
+python -m ha4t.editor -p <PORT>
 ```
 
 # Environment

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 __version__ = "0.1.6"
-__all__ = ["__version__", "Device", "connect"]
+__all__ = ["__version__", "Device", "connect", "include"]
 
 import os
 import time
@@ -478,3 +478,81 @@ def connect(platform: str = "android",
     log_out(f"设备信息：{dev.device_info}")
 
     return dev
+
+# ── 用例引用 (步骤复用) ──────────────────────────────────────────────
+
+_INCLUDE_STACK: List[str] = []
+
+
+def include(path: str) -> None:
+    """在当前进程内执行另一个用例 .py 文件，复用其步骤。
+
+    被引用文件中的 ``import os / os.environ / from ha4t import ... /
+    from time import sleep / dev = connect(...)`` 这些样板代码会被剥离，
+    其余源码在调用者的全局命名空间中 ``exec``——这样被引用文件可以直接
+    使用调用者已经建立的 ``dev`` 连接、``sleep`` 等符号，无需重新连接设备。
+
+    路径解析顺序：调用者所在目录 → 当前工作目录 → 字面路径。
+    通过 ``_INCLUDE_STACK`` 防止循环引用。
+
+    :param path: 被引用用例的相对/绝对 .py 路径
+    """
+    import inspect
+
+    frame = inspect.stack()[1].frame
+    caller_file = frame.f_globals.get("__file__")
+    candidates: List[str] = []
+    if caller_file:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(caller_file)), path))
+    candidates.append(os.path.join(os.getcwd(), path))
+    candidates.append(path)
+
+    resolved = next((p for p in candidates if os.path.isfile(p)), None)
+    if resolved is None:
+        raise FileNotFoundError(
+            f"include: 找不到用例文件 '{path}' (已尝试: {candidates})"
+        )
+    resolved = os.path.abspath(resolved)
+
+    if resolved in _INCLUDE_STACK:
+        chain = " -> ".join(_INCLUDE_STACK + [resolved])
+        raise RuntimeError(f"include: 循环引用：{chain}")
+
+    with open(resolved, encoding="utf-8") as f:
+        src = f.read()
+
+    # 剥离样板：避免被引用文件重新 connect 设备 / 重复导入。
+    skip_prefixes = (
+        "from ha4t import",
+        "import ha4t",
+        "from time import sleep",
+        "import os",
+        "os.environ[",
+    )
+    cleaned_lines: List[str] = []
+    for line in src.split("\n"):
+        stripped = line.lstrip()
+        if any(stripped.startswith(p) for p in skip_prefixes):
+            continue
+        # dev = connect(...) / dev=connect(...) — 任何对 connect 的赋值
+        if stripped.lstrip().split("=", 1)[0].strip().isidentifier() and "=" in stripped:
+            lhs, _, rhs = stripped.partition("=")
+            if rhs.lstrip().startswith("connect("):
+                continue
+        cleaned_lines.append(line)
+    cleaned_src = "\n".join(cleaned_lines)
+
+    # Merge caller locals into the exec globals so symbols defined inside a
+    # function (e.g. tests, helper wrappers) are visible to the included file
+    # in addition to module-level ones. This is how editor scripts always
+    # populate `dev` at module top level, but the union keeps the helper
+    # usable from any scope.
+    exec_globals = dict(frame.f_globals)
+    exec_globals.update(frame.f_locals)
+
+    _INCLUDE_STACK.append(resolved)
+    try:
+        code_obj = compile(cleaned_src, resolved, "exec")
+        exec(code_obj, exec_globals)  # noqa: S102 — intentional script include
+    finally:
+        _INCLUDE_STACK.pop()
