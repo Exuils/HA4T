@@ -19,6 +19,9 @@ export function usePom() {
   const desc               = ref('');
   const triggers           = ref('');
   const elements           = ref({});
+  // 元素描述（自由文本）—— 后端 round-trip 到 pom/<page>.py 里每条元素上方的 `# ...` 注释，
+  // **不进 selector dict**（避免被 driver 当未知 kwarg），仅给 AI / 人读 POM 时理解元素语义。
+  const elementDocs        = ref({});
   // Global meta
   const metaVars           = ref({});
   // Capture state
@@ -26,6 +29,7 @@ export function usePom() {
   const nameDialogVisible  = ref(false);
   const pendingSelector    = ref(null);
   const pendingName        = ref('');
+  const pendingDoc         = ref('');    // 命名/编辑弹框里的「说明」textarea；空串 → 不写注释
   // Image element thumbnails — keyed by image filename, value is "data:..." URL
   // populated by selectPage() (which fetches each referenced image once) and
   // beginImageCapture() (which seeds it with the freshly captured screenshot).
@@ -45,6 +49,7 @@ export function usePom() {
       currentFile.value = '';
       page.value = ''; desc.value = ''; triggers.value = '';
       elements.value = {};
+      elementDocs.value = {};
       imageCache.value = {};
       return;
     }
@@ -56,6 +61,7 @@ export function usePom() {
       desc.value     = res.data.desc || '';
       triggers.value = res.data.triggers || '';
       elements.value = res.data.elements || {};
+      elementDocs.value = res.data.docs || {};
       // 拉取页面里所有 image 元素的缩略图 — fire-and-forget per file，单张失败不阻塞
       const wanted = new Set();
       for (const sel of Object.values(elements.value)) {
@@ -82,7 +88,7 @@ export function usePom() {
     }
     try {
       const res = await pomSavePage({
-        page: pageName, desc: descText || '', triggers: '', elements: {}, vars: {},
+        page: pageName, desc: descText || '', triggers: '', elements: {}, docs: {}, vars: {},
       });
       if (!res.success) { _msgError(msg, res.message || '创建失败'); return false; }
       await loadPages();
@@ -111,6 +117,7 @@ export function usePom() {
       desc: desc.value || '',
       triggers: triggers.value || '',
       elements: elements.value,
+      docs: elementDocs.value,
     }).catch(() => {});
   }
 
@@ -150,6 +157,7 @@ export function usePom() {
       .replace(/[\x00-\x1f\x7f\u2028\u2029]+/g, ' ')   // 控制字符压成普通空格
       .replace(/\s+/g, ' ')                            // 连续空白压一个，去掉换行
       .trim();
+    pendingDoc.value = '';
     nameDialogVisible.value = true;
   }
 
@@ -160,6 +168,7 @@ export function usePom() {
     imageCache.value = { ...imageCache.value, [filename]: dataUrl };
     pendingSelector.value = { image: filename };
     pendingName.value = '';   // 图像元素无现成名字来源，用户必填
+    pendingDoc.value = '';
     nameDialogVisible.value = true;
   }
 
@@ -213,15 +222,20 @@ export function usePom() {
       return;
     }
     elements.value = { ...elements.value, [name]: selector };
+    const doc = (pendingDoc.value || '').trim();
+    if (doc) {
+      elementDocs.value = { ...elementDocs.value, [name]: doc };
+    }
     saveCurrentPage();
     nameDialogVisible.value = false;
     pendingSelector.value = null;
     pendingName.value = '';
+    pendingDoc.value = '';
     msg && msg.success && msg.success(`已采集元素: ${name}`);
   }
 
-  // Update an existing element's name and/or selector. Returns true on success.
-  function updateElement(oldName, newName, newSelector, msg) {
+  // Update an existing element's name / selector / doc. Returns true on success.
+  function updateElement(oldName, newName, newSelector, newDoc, msg) {
     const nn = (newName || '').trim();
     if (!_validName(nn)) {
       _msgError(msg, '元素名不能为空，且不可包含换行、制表符或其它控制字符');
@@ -243,8 +257,16 @@ export function usePom() {
       next[k === oldName ? nn : k] = (k === oldName) ? cleaned : v;
     }
     elements.value = next;
+
+    // docs：rename 时跟着搬，doc 文本变了就更新 / 清空。
+    const nextDocs = { ...elementDocs.value };
+    delete nextDocs[oldName];
+    const docStr = (newDoc === undefined || newDoc === null) ? (elementDocs.value[oldName] || '') : String(newDoc);
+    const docTrimmed = docStr.trim();
+    if (docTrimmed) nextDocs[nn] = docTrimmed;
+    elementDocs.value = nextDocs;
+
     saveCurrentPage();
-    // 验证模式下改了 selector → 立刻重扫，让用户看到新的定位结果
     if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
     return true;
   }
@@ -253,8 +275,10 @@ export function usePom() {
     const next = { ...elements.value };
     delete next[name];
     elements.value = next;
+    const nextDocs = { ...elementDocs.value };
+    delete nextDocs[name];
+    elementDocs.value = nextDocs;
     saveCurrentPage();
-    // 验证模式下删了元素 → 重扫刷新计数与高亮
     if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
   }
 
@@ -268,9 +292,9 @@ export function usePom() {
 
   return {
     // state
-    pages, currentFile, page, desc, triggers, elements,
+    pages, currentFile, page, desc, triggers, elements, elementDocs,
     metaVars,
-    captureMode, nameDialogVisible, pendingSelector, pendingName,
+    captureMode, nameDialogVisible, pendingSelector, pendingName, pendingDoc,
     imageCache,
     // methods
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,

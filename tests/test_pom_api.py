@@ -100,6 +100,59 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(parsed["meta"]["desc"], "D")
         self.assertEqual(parsed["elements"], {})
 
+    def test_render_then_parse_docs_roundtrip(self):
+        """docs 写出为元素上方的 `# ...` 注释，解析时按行回填到 docs 字典。"""
+        elements = {
+            "登录按钮": {"text": "登录"},
+            "商品项":   {"xpath": "//*[@id='list']/View"},
+        }
+        docs = {
+            "登录按钮": "顶部主按钮，点击进入登录态",
+            "商品项":   "列表项模板。用例调用时追加 [index] 选第几个（1-based）。\nindex 由测试数据决定。",
+        }
+        py = _render_pom_py("商品页", "", "", elements, docs)
+        # 渲染输出每条 doc 落在元素上方
+        self.assertIn("    # 顶部主按钮，点击进入登录态\n    '登录按钮'", py)
+        # 多行 doc 拆成多行 `# ...`
+        self.assertIn("    # 列表项模板。用例调用时追加 [index] 选第几个（1-based）。\n    # index 由测试数据决定。\n    '商品项'", py)
+
+        parsed = _parse_pom_py(py)
+        self.assertEqual(parsed["elements"], elements)
+        self.assertEqual(parsed["docs"], docs)
+
+    def test_parse_preserves_handwritten_comment(self):
+        """用户手工在 pom/<page>.py 里写注释 → GET 时被读回，编辑器后续 save 保留。"""
+        py = (
+            "# -*- coding: utf-8 -*-\n"
+            "# kind: pom\n"
+            "# page: LoginPage\n"
+            "\n"
+            "ELEMENTS = {\n"
+            "    # 人写的注释\n"
+            "    '登录按钮': {'text': '登录'},\n"
+            "}\n"
+        )
+        parsed = _parse_pom_py(py)
+        self.assertEqual(parsed["docs"], {"登录按钮": "人写的注释"})
+
+    def test_parse_blank_line_truncates_doc(self):
+        """元素与注释之间有空行 → 注释不属于该元素（视作模块/段落注释，丢弃）。"""
+        py = (
+            "ELEMENTS = {\n"
+            "    # 这是模块说明\n"
+            "\n"
+            "    '按钮': {'text': 'go'},\n"
+            "}\n"
+        )
+        parsed = _parse_pom_py(py)
+        self.assertEqual(parsed["docs"], {})
+
+    def test_render_no_docs_unchanged(self):
+        """docs 为空或某 key 没 doc → 不写注释行。保持向后兼容。"""
+        py = _render_pom_py("P", "", "", {"a": {"text": "x"}}, None)
+        self.assertNotIn("#", py.split("ELEMENTS")[1])  # ELEMENTS 之后段不再有 #
+        py2 = _render_pom_py("P", "", "", {"a": {"text": "x"}}, {})
+        self.assertEqual(py, py2)
 
 class TestPomEndpoints(unittest.TestCase):
     """端点循环：create → list → get → save(更新) → delete + __init__ 验证。"""

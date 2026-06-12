@@ -318,6 +318,9 @@ const TEMPLATE = `
                 <span v-else-if="statusOf(name) === 'not_found'" class="pom-el-status-tag tag-notfound"
                     :title="(verify.results.value[name] && verify.results.value[name].error) || ''">未找到</span>
               </template>
+              <el-tooltip v-if="pom.elementDocs.value[name]" :content="pom.elementDocs.value[name]" placement="top" :show-after="200">
+                <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
+              </el-tooltip>
               <el-button size="small" v-if="!(sel && sel.image)" @click="verify.flashOne(name, sel)" title="高亮 3 秒"><el-icon><View /></el-icon></el-button>
               <el-button size="small" @click="beginEditElement(name, sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
               <el-button size="small" @click="pom.removeElement(name)" title="删除"><el-icon><Close /></el-icon></el-button>
@@ -326,6 +329,10 @@ const TEMPLATE = `
               <div class="prop-row" style="margin-bottom:4px">
                 <label class="prop-label">名称</label>
                 <el-input v-model="editingName" size="small" autofocus></el-input>
+              </div>
+              <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
+                <label class="prop-label" style="padding-top:5px">说明</label>
+                <el-input v-model="editingDoc" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明，落到 .py 上方的 # 注释"></el-input>
               </div>
               <template v-if="editingSelector.image">
                 <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
@@ -437,6 +444,10 @@ const TEMPLATE = `
     <div class="prop-row" style="margin-bottom:8px">
       <label class="prop-label">元素名</label>
       <el-input v-model="pom.pendingName.value" size="small" placeholder="如 登录按钮 / login_button" @keyup.enter="pom.confirmCapture(msg)" autofocus></el-input>
+    </div>
+    <div class="prop-row" style="margin-bottom:8px;align-items:flex-start">
+      <label class="prop-label" style="padding-top:5px">说明</label>
+      <el-input v-model="pom.pendingDoc.value" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明（如「列表项模板，用例追加 [index] 选第几个」）。落到 pom/<page>.py 该元素上方的 # 注释。"></el-input>
     </div>
     <template v-if="pom.pendingSelector.value && pom.pendingSelector.value.image">
       <div style="font-size:11px;color:var(--fg-2);margin:8px 0 4px">图像预览（保存后用 dev.click(image=...) 模板匹配定位）</div>
@@ -755,6 +766,7 @@ export default {
     const editingElementName = ref('');
     const editingName        = ref('');
     const editingSelector    = ref({});
+    const editingDoc         = ref('');     // 编辑中的说明文本；与 pom.elementDocs[name] 同步
 
     function formatSelector(sel) {
       if (!sel) return '';
@@ -769,14 +781,16 @@ export default {
       editingElementName.value = name;
       editingName.value = name;
       editingSelector.value = { ...(sel || {}) };
+      editingDoc.value = pom.elementDocs.value[name] || '';
     }
     function cancelEditElement() {
       editingElementName.value = '';
       editingName.value = '';
       editingSelector.value = {};
+      editingDoc.value = '';
     }
     function commitEditElement(oldName) {
-      const ok = pom.updateElement(oldName, editingName.value, editingSelector.value, msg);
+      const ok = pom.updateElement(oldName, editingName.value, editingSelector.value, editingDoc.value, msg);
       if (ok) cancelEditElement();
     }
 
@@ -894,7 +908,7 @@ export default {
       onCliKeydown, onCliInput, submitCli, pickSlash, focusCli, toggleLog,
       // pom
       SELECTOR_KEYS, SELECTOR_LABELS,
-      editingElementName, editingName, editingSelector,
+      editingElementName, editingName, editingSelector, editingDoc,
       formatSelector, beginEditElement, cancelEditElement, commitEditElement,
       onSelectPage, onDeletePage,
       newPageDialogVisible, newPageName, newPageDesc, onCreatePage,

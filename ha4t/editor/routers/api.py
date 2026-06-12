@@ -228,9 +228,12 @@ def _page_filename(page: str) -> str:
 
 
 def _parse_pom_py(content: str) -> dict:
-    """解析 pom page / meta 文件 → {'meta': {page,desc,triggers}, 'elements': {}, 'vars': {}}。
-    用 ast.literal_eval 抽取顶层 ELEMENTS / VARS 赋值；语法错误时返回空 dict（不抛异常）。
-    page 文件不写 VARS（只 _meta.py 写）。"""
+    """解析 pom page / meta 文件 → {'meta': {...}, 'elements': {}, 'docs': {}, 'vars': {}}。
+
+    用 ast.literal_eval 抽顶层 ELEMENTS / VARS 字面量；用 tokenize 抽 ELEMENTS dict 内
+    每项 key 紧邻上方的连续 `#` 注释作为该元素的 doc（多行用 \n 合并）。语法错误时返回空 dict。
+    docs 与 elements 并列，不进 selector 字典——driver 不会拿到。
+    """
     meta = {'page': '', 'desc': '', 'triggers': ''}
     for line in content.split('\n'):
         if line.startswith('# page:'):
@@ -239,7 +242,9 @@ def _parse_pom_py(content: str) -> dict:
             meta['desc'] = line.split(':', 1)[1].strip()
         elif line.startswith('# triggers:'):
             meta['triggers'] = line.split(':', 1)[1].strip()
-    elements, pvars = {}, {}
+
+    elements, pvars, docs = {}, {}, {}
+    elements_keys_by_line: dict[int, str] = {}   # ELEMENTS dict 内每个 key 字符串 → 所在行号
     try:
         tree = ast.parse(content)
         for node in tree.body:
@@ -249,23 +254,69 @@ def _parse_pom_py(content: str) -> dict:
                     val = ast.literal_eval(node.value)
                 except (ValueError, SyntaxError):
                     continue
-                if name == 'ELEMENTS' and isinstance(val, dict):
+                if name == 'ELEMENTS' and isinstance(val, dict) and isinstance(node.value, ast.Dict):
                     elements = val
+                    # 拿每个 key node 的行号 —— literal_eval 后值已是 python 对象，但 node.value.keys 还在 AST 上
+                    for key_node in node.value.keys:
+                        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                            elements_keys_by_line[key_node.lineno] = key_node.value
                 elif name == 'VARS' and isinstance(val, dict):
                     pvars = val
     except SyntaxError:
         pass
-    return {'meta': meta, 'elements': elements, 'vars': pvars}
+
+    # 用 tokenize 收集所有注释行 lineno → 注释文本（去掉前导 # 与一个紧邻空格）
+    comments_by_line: dict[int, str] = {}
+    try:
+        import io, tokenize as _tok
+        for tok in _tok.generate_tokens(io.StringIO(content).readline):
+            if tok.type == _tok.COMMENT:
+                txt = tok.string
+                if txt.startswith('#'):
+                    txt = txt[1:]
+                    if txt.startswith(' '):
+                        txt = txt[1:]
+                comments_by_line[tok.start[0]] = txt
+    except (_tok.TokenError, IndentationError):
+        pass
+
+    # 对 ELEMENTS dict 里每个 key：向上扫连续的 `#` 注释行（不能被代码行/空行截断），
+    # 倒序合并成 doc；跳过 ELEMENTS 模块级 meta（`# page:` 等）—— 它们行号在 ELEMENTS 之前。
+    code_lines = content.split('\n')
+    for key_line, key_name in elements_keys_by_line.items():
+        doc_parts: list[str] = []
+        L = key_line - 1
+        while L >= 1:
+            if L in comments_by_line:
+                doc_parts.append(comments_by_line[L])
+                L -= 1
+                continue
+            # 整行只剩空白？空行截断，停止收集。
+            raw = code_lines[L - 1] if L - 1 < len(code_lines) else ''
+            if raw.strip() == '':
+                break
+            # 非注释、非空行 → 已抵达上一个元素 / 代码，停止。
+            break
+        if doc_parts:
+            doc_parts.reverse()
+            docs[key_name] = '\n'.join(doc_parts).rstrip()
+
+    return {'meta': meta, 'elements': elements, 'docs': docs, 'vars': pvars}
 
 
-def _render_pom_py(page: str, desc: str, triggers: str, elements: dict) -> str:
+def _render_pom_py(page: str, desc: str, triggers: str, elements: dict, docs: dict | None = None) -> str:
     lines = ['# -*- coding: utf-8 -*-', '# kind: pom', f'# page: {page}']
     if desc:
         lines.append(f'# desc: {desc}')
     if triggers:
         lines.append(f'# triggers: {triggers}')
     lines += ['', 'ELEMENTS = {']
+    docs = docs or {}
     for k, v in elements.items():
+        doc = (docs.get(k) or '').strip()
+        if doc:
+            for dl in doc.split('\n'):
+                lines.append(f'    # {dl}'.rstrip())
         lines.append(f'    {k!r}: {v!r},')
     lines += ['}', '']
     return '\n'.join(lines)
@@ -556,6 +607,7 @@ class PomPageSaveRequest(BaseModel):
     desc: str = ''
     triggers: str = ''
     elements: dict = {}
+    docs: dict = {}     # 元素名 → 自由文本注释；渲染时插在该元素上方 `# ...` 行
 
 
 class PomMetaSaveRequest(BaseModel):
@@ -598,6 +650,7 @@ def pom_get_page(filename: str):
         'desc': parsed['meta']['desc'],
         'triggers': parsed['meta']['triggers'],
         'elements': parsed['elements'],
+        'docs': parsed['docs'],
     })
 
 
@@ -613,7 +666,7 @@ def pom_save_page(req: PomPageSaveRequest):
     filename = _page_filename(req.page)
     path = _pom_dir() / filename
     path.write_text(
-        _render_pom_py(req.page, req.desc, req.triggers, req.elements),
+        _render_pom_py(req.page, req.desc, req.triggers, req.elements, req.docs),
         encoding='utf-8',
     )
     _regen_pom_init()
