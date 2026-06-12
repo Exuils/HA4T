@@ -33,6 +33,19 @@ function esc(s) {
   return (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
+// Derive a disk filename from a human case name. Keeps CJK / unicode intact —
+// only strips characters illegal in a file path (Windows-superset:
+// \ / : * ? " < > | and control chars), collapses whitespace, and trims
+// leading/trailing dots & spaces. Falls back to a timestamped name when nothing
+// usable remains, so an empty name never produces a bare ".py".
+export function fileNameFromName(name) {
+  const base = (name || '')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .replace(/\s+/g, '_');
+  return (base || `用例_${Date.now()}`) + '.py';
+}
+
 // Build a locator dict from a parsed hierarchy node — module-level so POM
 // capture can reuse the exact same selector shape as element step recording.
 export function selectorFromNode(node) {
@@ -308,8 +321,8 @@ export function useTask() {
 
   async function saveCurrentTask(serial) {
     if (!currentYamlFile.value) {
-      currentYamlFile.value = `untitled_${Date.now()}.py`;
       taskName.value = taskName.value || '新建用例';
+      currentYamlFile.value = fileNameFromName(taskName.value);
       taskPlatform.value = taskPlatform.value || 'android';
       if (!projectId.value) projectId.value = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
       saveToLocalStorage('currentYamlFile', currentYamlFile.value);
@@ -417,7 +430,7 @@ export function useTask() {
       tap:       `dev.click(text="${esc(value)}")`,
       drag:      `dev.swipe((300, 300), (300, 700))`,
       key:       `dev.press("${esc(value)}")`,
-      launchapp: `dev.app_start("${esc(value)}")`,
+      launchapp: `dev.start_app("${esc(value)}")`,
       wait:      `sleep(${value})`,
     };
     return m[action] || esc(value);
@@ -440,10 +453,33 @@ export function useTask() {
     return { icon: m[status] || '○', cls: 'icon-' + status };
   }
 
-  async function loadApps(msg) {
-    if (appsCache.value.length) return;
-    // serial/platform injected at call site
-    msg.info('appsCache not populated — call loadAppsWithDevice');
+  async function loadApps(platform, serial, msg) {
+    // 已缓存就直接复用 —— 同一设备的包列表用一次拉取即可。
+    if (appsCache.value.length) {
+      console.debug('[loadApps] cache hit, n=', appsCache.value.length);
+      return;
+    }
+    if (!platform || !serial) {
+      console.debug('[loadApps] skipped: no device', { platform, serial });
+      msg && msg.warn && msg.warn('请先连接设备再选择应用');
+      return;
+    }
+    console.debug('[loadApps] fetching', platform, serial);
+    try {
+      const res = await listPackages(platform, serial);
+      console.debug('[loadApps] response', res);
+      if (res.success && Array.isArray(res.data)) {
+        appsCache.value = res.data;
+        if (!res.data.length) {
+          msg && msg.warn && msg.warn(`${platform} 暂不支持获取应用列表，请手动输入包名`);
+        }
+      } else if (msg && msg.error) {
+        msg.error(res.message || '获取应用列表失败');
+      }
+    } catch (e) {
+      console.error('[loadApps] error', e);
+      msg && msg.error && msg.error('获取应用列表失败: ' + (e.message || e));
+    }
   }
 
   async function cleanupTaskImages(msg) {
@@ -468,9 +504,8 @@ export function useTask() {
     if (c.startsWith('# --step--')) return 'code';
     if (c.startsWith('key(')) return 'key';
     if (c.startsWith('sleep(')) return 'wait';
-    if (/^(dev\.)?start_app\(/.test(c) || c.startsWith('launchapp(')) return 'launchapp';
+    if (/^(dev\.)?start_app\(/.test(c)) return 'launchapp';
     if (/^(dev\.)?press\(/.test(c)) return 'key';
-    if (/^(dev\.)?app_start\(/.test(c)) return 'launchapp';
     return 'code';
   }
 
@@ -484,7 +519,7 @@ export function useTask() {
       case 'swipe': { const m = c.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/); config.fields = m ? { x1:+m[1], y1:+m[2], x2:+m[3], y2:+m[4] } : { _raw:c }; break; }
       case 'tap': { const m = c.match(/^(?:dev\.)?click\((.*)\)$/); config.fields = { selector: m ? m[1] : '' }; break; }
       case 'key': { const m = c.match(/(?:press|key)\("([^"]*)"\)/); config.fields = { key: m ? m[1] : '' }; break; }
-      case 'launchapp': { const m = c.match(/(?:app_start|start_app|launchapp)\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
+      case 'launchapp': { const m = c.match(/start_app\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
       case 'wait': { const m = c.match(/(?:time\.)?sleep\(([\d.]+)\)/); config.fields = { seconds: m ? +m[1] : 1 }; break; }
       default: config.fields = { _raw: c };
     }
@@ -503,7 +538,7 @@ export function useTask() {
       case 'swipe': { const m = step.code.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/); if (!m) break; const f = { x1:m[1], y1:m[2], x2:m[3], y2:m[4], [field]:value }; step.code = `swipe((${+f.x1}, ${+f.y1}), (${+f.x2}, ${+f.y2}))`; break; }
       case 'tap':      step.code = `dev.click(${value})`; break;
       case 'key':      step.code = `dev.press("${esc(value)}")`; break;
-      case 'launchapp':step.code = `dev.app_start("${esc(value)}")`; break;
+      case 'launchapp':step.code = `dev.start_app("${esc(value)}")`; break;
       case 'wait':     step.code = `sleep(${value})`; break;
     }
     _dirtyStep(stepIndex, serial);
@@ -616,7 +651,7 @@ export function useTask() {
     clearTask, parseYamlToTask, taskToYaml, taskToYamlSingle, taskToYamlFrom,
     saveCurrentTask, refreshYamlFiles, loadYamlFile, stepToCode, elementFromNode,
     loadStepsFromFile, buildIncludeStep,
-    selectStep, stepIcon, cleanupTaskImages,
+    selectStep, stepIcon, cleanupTaskImages, loadApps,
     computedStepType, selectedStepConfig, updateStepField,
     _updateElementField, _updateImgField, removeSelectorField,
     generateElementCode, generateImgCode, buildSelectorString,

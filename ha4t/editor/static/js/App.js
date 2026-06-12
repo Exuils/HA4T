@@ -5,15 +5,17 @@ import { useTask }   from './composables/useTask.js';
 import { useRunner } from './composables/useRunner.js';
 import { usePom }    from './composables/usePom.js';
 import { usePomVerify } from './composables/usePomVerify.js';
+import { useWorkspace } from './composables/useWorkspace.js';
 import DevicePane    from './components/DevicePane.js';
 import StepPane      from './components/StepPane.js';
 import InspectorPane from './components/InspectorPane.js';
 import ConsolePane   from './components/ConsolePane.js';
+import WorkspaceGate from './components/WorkspaceGate.js';
 
 import { saveToLocalStorage, getFromLocalStorage } from './utils.js';
 import { getVersion, listDevices as apiListDevices, connectDevice as apiConnectDevice } from './api.js';
 
-const { defineComponent, provide, watch, onMounted, nextTick, ref } = Vue;
+const { defineComponent, provide, watch, onMounted, nextTick, ref, computed } = Vue;
 
 const TEMPLATE = `
 <div class="layout" :class="{ 'capture-mode': device.captureMode.value }">
@@ -51,8 +53,15 @@ const TEMPLATE = `
       <span>获取层级</span>
     </el-button>
     <div style="flex:1"></div>
+    <div class="header-workspace" v-if="workspace.initialized.value" :title="workspace.current.value">
+      <span>工作区:</span>
+      <span class="ws-name">{{ workspaceName }}</span>
+      <el-button size="small" link @click="switchWorkspace">切换</el-button>
+    </div>
     <el-link href="https://github.com/exuils/HA4T" target="_blank" :underline="false" style="color:#8492a6">GitHub</el-link>
   </div>
+
+  <WorkspaceGate />
 
 
   <!-- Left divider drag -->
@@ -80,7 +89,7 @@ const TEMPLATE = `
 export default defineComponent({
   name: 'App',
   template: TEMPLATE,
-  components: { DevicePane, StepPane, InspectorPane },
+  components: { DevicePane, StepPane, InspectorPane, WorkspaceGate },
 
   setup() {
     const msg    = useMsg();
@@ -90,6 +99,8 @@ export default defineComponent({
     const runner = useRunner(task, device);
     const pom    = usePom();
     const verify = usePomVerify({ pom, device, msg });
+    const workspace = useWorkspace();
+
 
 
     provide('msg',    msg);
@@ -99,6 +110,29 @@ export default defineComponent({
     provide('runner', runner);
     provide('pom',    pom);
     provide('verify', verify);
+    provide('workspace', workspace);
+
+    // 工作区切换/初始化完成后：清掉旧用例选择 + 重新拉数据。
+    async function reloadWorkspaceData() {
+      try {
+        task.currentYamlFile && (task.currentYamlFile.value = '');
+      } catch (e) { /* ignore */ }
+      try { saveToLocalStorage('currentYamlFile', ''); } catch (e) { /* ignore */ }
+      await task.refreshYamlFiles();
+    }
+    provide('onWorkspaceReady', reloadWorkspaceData);
+
+    const workspaceName = computed(() => {
+      const p = (workspace.current.value || '').replace(/[\\/]+$/, '');
+      if (!p) return '';
+      const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+      return idx >= 0 ? p.slice(idx + 1) : p;
+    });
+
+    function switchWorkspace() {
+      // 让 gate 重新出现；后续 open/init 完成会清掉旧文件并重新加载。
+      workspace.initialized.value = false;
+    }
 
     const version = ref('');
 
@@ -107,6 +141,10 @@ export default defineComponent({
     watch(() => device.platform.value, (v) => saveToLocalStorage('platform', v));
     watch(() => device.wdaUrl.value,   (v) => saveToLocalStorage('wdaUrl', v));
     watch(() => device.snapshotMaxDepth.value, (v) => saveToLocalStorage('snapshotMaxDepth', v));
+    // 设备/平台切换 → 应用列表缓存失效，下次打开 launchapp 重新拉取。
+    watch(() => [device.platform.value, device.serial.value], () => {
+      task.appsCache.value = [];
+    });
 
 
     // 验证结果 → 截图 overlay 同步（useCanvas.renderHierarchy 读 window._pomVerifyResults）
@@ -189,10 +227,13 @@ export default defineComponent({
         version.value = res.data || '';
       } catch (e) { /* ignore */ }
 
-      // load file list and saved file
-      await task.refreshYamlFiles();
-      if (task.currentYamlFile.value) {
-        await task.loadYamlFile(task.currentYamlFile.value, msg);
+      // 先拉工作区状态：未选 → gate 显示，数据加载等 gate 完成后由 onWorkspaceReady 触发。
+      await workspace.load();
+      if (workspace.initialized.value) {
+        await task.refreshYamlFiles();
+        if (task.currentYamlFile.value) {
+          await task.loadYamlFile(task.currentYamlFile.value, msg);
+        }
       }
 
       // keyboard shortcuts
@@ -224,6 +265,7 @@ export default defineComponent({
 
     return {
       version, device, task, runner, msg,
+      workspace, workspaceName, switchWorkspace,
       onDeviceDropdown, connectDevice, doScreenshotAndDump,
       draggingLeft, draggingRight, startDragLeft, startDragRight,
     };

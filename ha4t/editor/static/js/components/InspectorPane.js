@@ -227,7 +227,7 @@ const TEMPLATE = `
 
           <template v-if="stepConfig.type === 'launchapp'">
             <div class="prop-row"><label class="prop-label">包名</label>
-              <el-select :model-value="stepConfig.fields.package || ''" @update:modelValue="v => upd('launchapp', v)" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
+              <el-select :model-value="stepConfig.fields.package || ''" @update:modelValue="v => upd('launchapp', v)" @visible-change="onLaunchappOpen" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
                 <el-option v-for="pkg in task.appsCache.value" :key="pkg" :label="pkg" :value="pkg"></el-option>
               </el-select>
             </div>
@@ -420,6 +420,12 @@ export default {
       upd('click_col', newCol);
       upd('click_row', newRow);
     }
+    // 下拉打开时按需拉一次包列表（已缓存则秒返回）；未连设备时给出温和提示而非空列表。
+    function onLaunchappOpen(open) {
+      if (!open) return;
+      task.loadApps(device.platform.value, device.serial.value, msg);
+    }
+
 
     return {
       task, device, msg, pom, activeTab, nodeFilterText, treeRef,
@@ -427,6 +433,7 @@ export default {
       upd, handleTreeNodeClick, handleTreeMouseEnter, handleTreeMouseLeave,
       filterNode,
       insertStepFromElement, addLocatorToPom, copyVal, renderImgConfigGrid, onGridCellClick,
+      onLaunchappOpen,
     };
   },
 };

@@ -116,9 +116,12 @@ export function useCanvas({ device, task, runner, msg, pom }) {
       }
     }
     // ── verify mode overlay（POM 元素定位结果，App.js watch 同步到全局） ──
+    // 仅画方框 + 元素名 tag，不填充元素 —— 填充会盖住截图内容，验证多元素时一片绿。
     if (window._pomVerifyResults) {
       const results = window._pomVerifyResults;
       ctx.setLineDash([]);
+      ctx.font = '11px Consolas, monospace';
+      ctx.textBaseline = 'top';
       for (const name of Object.keys(results)) {
         const r = results[name];
         if (r.status !== 'found' || !r.rect) continue;
@@ -126,12 +129,24 @@ export function useCanvas({ device, task, runner, msg, pom }) {
         const y = r.rect.y * scale + offsetY;
         const w = r.rect.width * scale;
         const h = r.rect.height * scale;
-        ctx.strokeStyle = '#67c23a'; ctx.lineWidth = 2;
-        ctx.fillStyle = 'rgba(103,194,58,0.15)';
-        ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
-        // 元素名标签
-        ctx.fillStyle = '#67c23a'; ctx.font = '11px Consolas, monospace';
-        ctx.fillText(name, x + 2, y + 12);
+
+        // 方框
+        ctx.strokeStyle = '#67c23a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        // 元素名 tag —— 实色背景，贴在方框左上角外侧（顶不够就翻进框内）。
+        const padX = 4, padY = 2;
+        const textW = ctx.measureText(name).width;
+        const tagW = textW + padX * 2;
+        const tagH = 14;
+        let tagX = x;
+        let tagY = y - tagH;
+        if (tagY < offsetY) tagY = y; // 上方空间不足 → 改贴到框内顶部
+        ctx.fillStyle = '#67c23a';
+        ctx.fillRect(tagX, tagY, tagW, tagH);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(name, tagX + padX, tagY + padY);
       }
     }
   }

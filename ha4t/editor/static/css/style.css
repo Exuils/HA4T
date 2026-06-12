@@ -659,3 +659,93 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 .pom-tools-verify-status .verify-count { color: #67c23a; font-weight: 600; }
 .pom-tools-verify-status .verify-manual { color: #e6a23c; }
 .pom-tools-verify-status .verify-pending { color: var(--fg-2); }
+
+/* ── Workspace Gate (overlay before workspace is selected) ──────── */
+.ws-gate {
+  position: fixed; inset: 0; z-index: 3000;
+  background: var(--bg-0);
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 24px;
+  overflow: auto;
+}
+.ws-gate-box {
+  width: 100%; max-width: 720px;
+  background: var(--bg-1);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.ws-gate-title {
+  font-size: 18px; font-weight: 600; color: var(--fg);
+}
+.ws-gate-hint {
+  font-size: 12px; color: var(--fg-2); line-height: 1.6;
+}
+.ws-gate-section-label {
+  font-size: 12px; color: var(--fg-2);
+  margin-bottom: 6px;
+}
+.ws-gate-path-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.ws-gate-recent-list {
+  max-height: 110px; overflow: auto;
+  border: 1px solid var(--bd); border-radius: 4px;
+  background: var(--bg-2);
+}
+.ws-gate-recent-item {
+  padding: 6px 10px; font-size: 12px;
+  border-bottom: 1px solid var(--bd);
+  cursor: pointer; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-gate-recent-item:last-child { border-bottom: none; }
+.ws-gate-recent-item:hover { background: var(--bd); }
+.ws-gate-tree {
+  display: flex; flex-direction: column;
+}
+.ws-gate-cwd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--bd);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+.ws-gate-cwd-path {
+  flex: 1; font-size: 12px; color: var(--fg-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-gate-tree-list {
+  max-height: 200px; overflow: auto;
+  border: 1px solid var(--bd);
+  border-radius: 0 0 4px 4px;
+  background: var(--bg-2);
+}
+.ws-gate-tree-item {
+  padding: 6px 10px; font-size: 13px; color: var(--fg);
+  border-bottom: 1px solid var(--bd);
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-gate-tree-item:last-child { border-bottom: none; }
+.ws-gate-tree-item:hover { background: var(--bd); }
+.ws-gate-tree-empty {
+  padding: 10px; font-size: 12px; color: var(--fg-2); text-align: center;
+}
+.ws-gate-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--bd);
+}
+
+/* 当前工作区显示在 header 上 */
+.header-workspace {
+  display: flex; align-items: center; gap: 6px;
+  margin-right: 12px;
+  font-size: 12px; color: var(--fg-2);
+  max-width: 280px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.header-workspace .ws-name { color: var(--fg); font-weight: 600; }

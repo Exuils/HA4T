@@ -130,16 +130,21 @@ export function usePom() {
   // ── Capture flow ───────────────────────────────────────────────────────
   function beginCapture(node) {
     pendingSelector.value = selectorFromNode(node);
-    // 建议名：优先用文本（语义最强，含中文也直接保留），其次 resourceId 尾段。
-    // 不做大小写归一化——中文无大小写概念，强行 toLowerCase 还会破坏 Unicode。
+    // 弹框「元素名」预填建议：优先级 text > description > resourceId 尾段。
+    // - text         : 可见文案，语义最强（含中文直接保留，不做大小写归一化）
+    // - description  : Android content-desc / iOS accessibility label —— 图标按钮
+    //                  常无 text 但有这个（如「返回」「搜索」「更多」）
+    // - resourceId   : 兜底；只取冒号/斜杠后最末段，避免完整 com.x.y:id/ 包名噪声
     let suggested = '';
     if (node.text) {
       suggested = String(node.text);
+    } else if (node.description) {
+      suggested = String(node.description);
     } else {
       const rid = node.resourceId || '';
       if (rid) suggested = rid.split(/[:/]/).pop() || '';
     }
-    // 仅保留：中英文字母 / 数字 / 下划线；空白与符号挤压成下划线，再去首尾下划线
+    // 仅保留：中英文字母 / 数字 / 下划线；其他符号 / 空白挤压成下划线，再去首尾下划线。
     pendingName.value = (suggested || '')
       .replace(/[^A-Za-z0-9_\u4e00-\u9fff]+/g, '_')
       .replace(/^_+|_+$/g, '');

@@ -1,13 +1,21 @@
-// xpathLite.js — JS 端最短稳定 xpath 生成器（与后端 ha4t/editor/parser/xpath_lite.py 等价）。
+// xpathLite.js — JS 端最短稳定 xpath 生成器（前后端同算法）。
+//
+// 真值源：本文件。Python 镜像在 ha4t/editor/parser/xpath_lite.py，给 /parser/xpath-lite
+// 端点与离线工具用；两份必须保持输出完全等价 —— 改一份一定同步另一份，并跑
+// tests/test_xpath_lite.py 对齐验收。
 //
 // 算法五层候选（短→长，第一个唯一就返回）：
 //   1. 单属性     //*[@resource-id="X"]
 //   2. type+单属  //android.widget.Button[@text="X"]
 //   3. 双属性     //*[@resource-id="X" and @text="Y"]
-//   4. 祖先锚定   //*[@resource-id="P"]//Class[@text="X"]   ← // 后代轴，跳过中间任意 wrapper
-//   5. 全路径兜底 //Layout/.../View[3]                       ← / 子轴
+//   4. 祖先锚定   //*[@resource-id="P"]//Class[@text="X"]   ← 目标有属性 → // 后代轴
+//                 //*[@resource-id="P"]/Type[i]/.../Type[j] ← 目标无属性 → / 子轴 + 每段 [idx]
+//   5. 全路径兜底 //Root[1]/.../View[1]                      ← / 子轴 + 每段 [idx]
 //
-// 关键 trick：层级拼接用 `//` 后代轴而不是 `/` 子轴，UI 增删 wrapper view 不影响匹配。
+// 关键 trick：anchor 之下，**只要目标有属性就用 `//` 后代轴**（中间多/少 wrapper 不影响匹配，
+// 反脆弱）；**目标无任何属性**时改走 anchor → 目标的 `/` 子轴绝对路径、每段强制带 sibling
+// 索引 —— `//Type[idx]` 在 `//` 后是 position 过滤（跨分支歧义匹配），必须避免。
+// Tier 5 同理：全段都带 [idx]（同类唯一也补 [1]），让 XPath 引擎一致定位。
 //
 // 时间复杂度：build O(N) 一次，query O(K) 候选数 + O(1) 哈希查找。
 
@@ -91,18 +99,43 @@ export class XPathLiteGenerator {
     return i < 0 ? null : i + 1;
   }
 
-  _tailForAnchor(node, ownAttrs, ownType) {
+  _tailForAnchor(node, ownAttrs, ownType, ancestor) {
+    // 目标自己有属性 → 单属性 + // 后代轴；属性已经做了 in-tree 唯一性判定（tier 4
+    // 的 anchor 已唯一，对其后代再加属性绝大多数场景命中即唯一）。短而稳。
     if (ownAttrs.length) {
       const [attr, value] = ownAttrs[0];
       const head = ownType || '*';
       return `//${head}[@${ATTR_NAME[attr]}=${escape(value)}]`;
     }
-    const idx = this._siblingIndex(node);
-    const head = ownType || '*';
-    return idx == null ? `//${head}` : `//${head}[${idx}]`;
+    // 目标无任何属性 —— 不能用 `//Type[idx]`，因为 `[idx]` 在 `//` 后是过滤式
+    // (`position()=idx`)，会匹配多个分支里"在各自父级中是第 idx 个"的所有节点。
+    // 改走 anchor → target 的 `/` 子轴绝对路径，每段必带 sibling 索引（含同类
+    // 唯一也保留 [1]，避免 anchor 多次匹配后路径在不同子树中表现不一致）。
+    return this._childPathFromAncestorTo(ancestor, node);
+  }
+
+  // 沿 _parentId 从 node 回溯到 ancestor（不含 ancestor），构造 /-子轴绝对路径段。
+  _childPathFromAncestorTo(ancestor, node) {
+    const segments = [];
+    let cur = node;
+    while (cur && cur !== ancestor) {
+      const parent = this.nodeMap.get(cur._parentId || '');
+      if (!parent) break;
+      const sameType = (parent.children || []).filter(s => s._type === cur._type);
+      const head = cur._type || '*';
+      const idx = sameType.indexOf(cur) + 1;
+      // 每段都加 index —— 即便同类仅 1 个，明确索引也比 ambig 更稳（XPath 引擎差异）。
+      segments.push(`${head}[${idx > 0 ? idx : 1}]`);
+      cur = parent;
+    }
+    if (!segments.length) return '';
+    segments.reverse();
+    return '/' + segments.join('/');   // 单 `/` 子轴
   }
 
   _buildFromRoot(node) {
+    // 全路径兜底：从顶（无父）开始，向下逐段 `/Type[idx]/Type[idx]/...`。每段都强制带 index
+    // —— 即使同类只有一个，明确 index 也避免 XPath 引擎在 `//Type` 起点歧义匹配。
     const segments = [];
     let cur = node;
     while (cur) {
@@ -110,7 +143,8 @@ export class XPathLiteGenerator {
       if (!parent) break;
       const sameType = (parent.children || []).filter(s => s._type === cur._type);
       const head = cur._type || '*';
-      segments.push(sameType.length <= 1 ? head : `${head}[${sameType.indexOf(cur) + 1}]`);
+      const idx = Math.max(sameType.indexOf(cur) + 1, 1);
+      segments.push(`${head}[${idx}]`);
       cur = parent;
     }
     segments.reverse();
@@ -159,7 +193,7 @@ export class XPathLiteGenerator {
       const ancAttrs = this.priority.filter(a => ancestor[a]).map(a => [a, ancestor[a]]);
       for (const [attr, value] of ancAttrs) {
         if (this._isUnique(attr, value)) {
-          return this._expr(null, [[attr, value]]) + this._tailForAnchor(node, ownAttrs, ownType);
+          return this._expr(null, [[attr, value]]) + this._tailForAnchor(node, ownAttrs, ownType, ancestor);
         }
       }
       ancestor = this.nodeMap.get(ancestor._parentId || '');

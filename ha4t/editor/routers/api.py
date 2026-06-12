@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import string
 import sys
 import tempfile
 import time
@@ -27,20 +28,37 @@ from ha4t.editor._models import (    ApiResponse, XPathLiteRequest,
 )
 from pydantic import BaseModel
 from ha4t.editor.parser.xpath_lite import XPathLiteGenerator
-from ha4t.editor._config import get_tasks_dir, get_images_dir, EditorConfig
+from ha4t.editor._config import (
+    get_workspace, get_tasks_dir, get_images_dir, EditorConfig,
+)
 
 
 router = APIRouter()
 
-TASKS_DIR = get_tasks_dir()
-IMAGES_DIR = get_images_dir()
+# 工作区未选定时为 None；所有数据端点先用 _no_ws() 守卫。
+TASKS_DIR = None
+IMAGES_DIR = None
+CASES_DIR = None
 
 
 def _refresh_paths():
-    """Re-read config so updated paths take effect without restart."""
-    global TASKS_DIR, IMAGES_DIR
-    TASKS_DIR = get_tasks_dir()
-    IMAGES_DIR = get_images_dir()
+    """Re-read config so updated workspace takes effect without restart."""
+    global TASKS_DIR, IMAGES_DIR, CASES_DIR
+    ws = get_workspace()
+    TASKS_DIR = ws
+    IMAGES_DIR = (ws / "images") if ws else None
+    CASES_DIR = (ws / "testcases") if ws else None
+    if IMAGES_DIR is not None:
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    if CASES_DIR is not None:
+        CASES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _no_ws():
+    return ApiResponse.doError("未选择工作区")
+
+
+_refresh_paths()
 
 
 _STEP_MARKER = "# --step--"
@@ -283,33 +301,208 @@ def _regen_pom_init() -> None:
     (d / '__init__.py').write_text('\n'.join(lines), encoding='utf-8')
 
 
-# ── Config (must be before /tasks/{filename:path}) ─────────────────
+# ── Workspace / FS browse (must be before /tasks/{filename:path}) ─────
 
-class ConfigUpdateRequest(BaseModel):
-    key: str
-    value: str
 
-@router.get("/config", response_model=ApiResponse)
-def get_config():
-    cfg = EditorConfig()
+class WorkspaceOpenRequest(BaseModel):
+    path: str
+
+
+class WorkspaceInitRequest(BaseModel):
+    parent: str
+    name: str
+
+
+def _init_workspace(target: Path) -> dict:
+    """在 ``target`` 下幂等铺出 HA4T 工作区骨架。
+
+    所有文件都「不存在才写」—— 已有的 ``conftest.py`` / ``pyproject.toml`` /
+    ``README.md`` / ``pom/_meta.py`` 等用户文件一律不动。目录用 ``exist_ok=True``。
+    返回 ``{path: 已创建的相对路径列表}``，调用方可日志/响应里告诉用户补了啥。
+    """
+    created: list[str] = []
+
+    def _put(rel: str, content: str) -> None:
+        f = target / rel
+        if f.exists():
+            return
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content, encoding='utf-8')
+        created.append(rel)
+
+    (target / 'pom').mkdir(parents=True, exist_ok=True)
+    (target / 'images').mkdir(parents=True, exist_ok=True)
+    (target / 'screenshots').mkdir(parents=True, exist_ok=True)
+    (target / 'testcases').mkdir(parents=True, exist_ok=True)
+    (target / '.claude' / 'skills' / 'ha4t-case-writer').mkdir(parents=True, exist_ok=True)
+
+    _put('pom/__init__.py', '# -*- coding: utf-8 -*-\n')
+    _put('pom/_meta.py', _render_pom_meta({}))
+    _put('images/.gitkeep', '')
+    _put('screenshots/.gitkeep', '')
+    _put('testcases/.gitkeep', '')
+
+    # 迁移：把历史遗留在工作区根的用例 .py 移入 testcases/（与 list_tasks 同一过滤口径）。
+    # 幂等——移动后根目录不再有用例文件；同名已存在则跳过、不覆盖。
+    cases_dir = target / 'testcases'
+    for f in target.glob('*.py'):
+        if f.name in ('conftest.py', '__init__.py') or f.name.startswith(('_', '.')):
+            continue
+        dest = cases_dir / f.name
+        if not dest.exists():
+            f.rename(dest)
+            created.append(f'testcases/{f.name} (migrated)')
+
+    skill_src = Path(__file__).parent.parent / 'skills' / 'ha4t-case-writer' / 'SKILL.md'
+    if skill_src.exists():
+        _put(
+            '.claude/skills/ha4t-case-writer/SKILL.md',
+            skill_src.read_text(encoding='utf-8'),
+        )
+
+    _put(
+        'conftest.py',
+        '# -*- coding: utf-8 -*-\n'
+        'import os\n'
+        'import sys\n'
+        'from ha4t.config import global_config\n'
+        '\n'
+        '# 工作区根入 sys.path —— 用例在 testcases/ 下仍可 `from pom import ...`\n'
+        '_WS_ROOT = os.path.dirname(os.path.abspath(__file__))\n'
+        'if _WS_ROOT not in sys.path:\n'
+        '    sys.path.insert(0, _WS_ROOT)\n'
+        '\n'
+        'def pytest_configure(config):\n'
+        '    global_config.current_path = os.path.join(_WS_ROOT, "images")\n',
+    )
+
+    _put(
+        'pyproject.toml',
+        '[project]\n'
+        'name = "ha4t-cases"\n'
+        'version = "0.1.0"\n'
+        'description = "HA4T automation test cases workspace"\n'
+        'requires-python = ">=3.10"\n'
+        'dependencies = [\n'
+        '    "ha4t",\n'
+        ']\n'
+        '\n'
+        '[tool.pytest.ini_options]\n'
+        'testpaths = ["testcases"]\n',
+    )
+
+    _put(
+        'README.md',
+        '# HA4T 用例工作区\n'
+        '\n'
+        '本目录由 HA4T 编辑器初始化，作为测试用例的独立工程；HA4T 作为依赖库使用。\n'
+        '\n'
+        '## 安装依赖\n'
+        '```\n'
+        'uv sync          # 或：pip install -U ha4t\n'
+        '```\n'
+        '\n'
+        '## 目录\n'
+        '- `pom/`         Page Object 元素库（编辑器「POM 采集」维护，勿手改 `__init__.py`）\n'
+        '- `images/`      模板图片（`dev.click(image="x.png")` 按裸名解析到此目录）\n'
+        '- `screenshots/` POM 图像元素裁剪源\n'
+        '- `testcases/`   测试用例（.py，编辑器新建用例落在此目录）\n'
+        '\n'
+        '## 用例写法\n'
+        '```python\n'
+        'from ha4t import connect\n'
+        'from pom import 登录页, VARS          # 只 import 用到的 page + 全局 VARS\n'
+        '\n'
+        'LOCAL_VARS = {"username": "tester"}   # 本用例特有常量（编辑器自动识别渲染）\n'
+        '\n'
+        'dev = connect(platform="android", device_serial="")\n'
+        'dev.start_app(VARS["package"])\n'
+        'dev.click(**登录页.ELEMENTS["登录按钮"])\n'
+        '```\n'
+        '- 全局常量 → POM 编辑器「全局 VARS」（写入 `pom/_meta.py`，代码 `VARS["key"]`）\n'
+        '- 用例常量 → 顶层 `LOCAL_VARS = {...}`（代码 `LOCAL_VARS["key"]`）\n'
+        '\n'
+        '详见 `.claude/skills/ha4t-case-writer/SKILL.md`。\n',
+    )
+
+    return {"created": created}
+
+
+@router.get("/fs/list", response_model=ApiResponse)
+def fs_list(path: str = ""):
+    """目录浏览：path 为空 → 根（盘符 / 根 + HOME），否则列子目录。"""
+    if not path:
+        roots = []
+        if sys.platform == "win32":
+            for c in string.ascii_uppercase:
+                d = Path(f"{c}:/")
+                if d.exists():
+                    roots.append({"name": f"{c}:", "path": str(d)})
+        else:
+            roots.append({"name": "/", "path": "/"})
+        home = Path.home()
+        roots.append({"name": f"~ ({home.name})", "path": str(home)})
+        return ApiResponse.doSuccess({"path": "", "parent": None, "entries": roots})
+    p = Path(path).expanduser()
+    if not p.is_dir():
+        return ApiResponse.doError("不是有效目录")
+    entries = []
+    try:
+        for child in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+            if child.is_dir() and not child.name.startswith('.'):
+                entries.append({"name": child.name, "path": str(child)})
+    except PermissionError:
+        entries = []
+    parent = str(p.parent) if p.parent != p else None
+    return ApiResponse.doSuccess({"path": str(p), "parent": parent, "entries": entries})
+
+
+@router.get("/workspace", response_model=ApiResponse)
+def workspace_status():
+    ws = get_workspace()
     return ApiResponse.doSuccess({
-        "tasks_dir": cfg.get("tasks_dir"),
-        "images_dir": cfg.get("images_dir"),
-        "screenshots_dir": cfg.get("screenshots_dir"),
+        "current": str(ws) if ws else "",
+        "recent": EditorConfig().recent(),
+        "initialized": ws is not None,
     })
 
-@router.post("/config", response_model=ApiResponse)
-def set_config(req: ConfigUpdateRequest):
-    cfg = EditorConfig()
-    cfg.set(req.key, req.value)
+
+@router.post("/workspace/open", response_model=ApiResponse)
+def workspace_open(req: WorkspaceOpenRequest):
+    try:
+        p = EditorConfig().set_workspace(req.path)
+    except ValueError as e:
+        return ApiResponse.doError(str(e))
+    # 幂等补骨架：已有的文件不动，缺的（skill / conftest / pyproject / pom 等）补上。
+    # 让「选一个普通目录」直接可用，避免用户还得手工跑一次 init。
+    info = _init_workspace(p)
     _refresh_paths()
-    return ApiResponse.doSuccess({"key": req.key, "value": req.value})
+    return ApiResponse.doSuccess({"path": str(p), "created": info["created"]})
+
+
+@router.post("/workspace/init", response_model=ApiResponse)
+def workspace_init(req: WorkspaceInitRequest):
+    parent = Path(req.parent).expanduser()
+    if not parent.is_dir():
+        return ApiResponse.doError("父目录不存在")
+    name = (req.name or "").strip()
+    if not name or any(c in name for c in r'\/:*?"<>|'):
+        return ApiResponse.doError("工作区名非法")
+    target = parent / name
+    if target.exists() and any(target.iterdir()):
+        return ApiResponse.doError("目录已存在且非空")
+    info = _init_workspace(target)
+    EditorConfig().set_workspace(str(target))
+    _refresh_paths()
+    return ApiResponse.doSuccess({"path": str(target), "created": info["created"]})
 
 
 @router.post("/tasks/open-folder", response_model=ApiResponse)
 def open_tasks_folder():
+    if TASKS_DIR is None:
+        return _no_ws()
     try:
-        path = str(TASKS_DIR)
+        path = str(CASES_DIR)
         if sys.platform == "win32":
             os.startfile(path)
         elif sys.platform == "darwin":
@@ -325,6 +518,8 @@ def open_tasks_folder():
 
 @router.get("/images/{imgname}", response_model=ApiResponse)
 def get_image(imgname: str):
+    if IMAGES_DIR is None:
+        return _no_ws()
     img_path = IMAGES_DIR / imgname
     if not img_path.exists():
         return ApiResponse.doError(f"Image not found: {imgname}")
@@ -337,6 +532,8 @@ class ImageUploadRequest(BaseModel):
 
 @router.post("/images/{imgname}", response_model=ApiResponse)
 def save_image(imgname: str, req: ImageUploadRequest):
+    if IMAGES_DIR is None:
+        return _no_ws()
     data = req.data or ""
     print(f"[save_image] received imgname={imgname}, data_len={len(data)}, starts_with_data={data.startswith('data:image')}")
     if data.startswith("data:image"):
@@ -367,6 +564,8 @@ class PomMetaSaveRequest(BaseModel):
 
 @router.get("/pom/pages", response_model=ApiResponse)
 def pom_list_pages():
+    if TASKS_DIR is None:
+        return _no_ws()
     d = _pom_dir()
     items = []
     for p in sorted(d.glob('*.py')):
@@ -387,6 +586,8 @@ def pom_list_pages():
 
 @router.get("/pom/pages/{filename}", response_model=ApiResponse)
 def pom_get_page(filename: str):
+    if TASKS_DIR is None:
+        return _no_ws()
     path = _pom_dir() / filename
     if not path.exists() or path.name.startswith('_'):
         return ApiResponse.doError("not found")
@@ -402,6 +603,8 @@ def pom_get_page(filename: str):
 
 @router.post("/pom/pages", response_model=ApiResponse)
 def pom_save_page(req: PomPageSaveRequest):
+    if TASKS_DIR is None:
+        return _no_ws()
     # page 名必须是合法 Python 标识符：覆盖 ASCII (LoginPage)、中文 (登录页)、
     # snake_case (login_page) 等；PEP 3131 已纳入中文为合法标识字符。
     # keyword.iskeyword() 阻止 'class' / 'def' 等保留字。
@@ -419,6 +622,8 @@ def pom_save_page(req: PomPageSaveRequest):
 
 @router.delete("/pom/pages/{filename}", response_model=ApiResponse)
 def pom_delete_page(filename: str):
+    if TASKS_DIR is None:
+        return _no_ws()
     path = _pom_dir() / filename
     if path.name.startswith('_') or not path.suffix == '.py':
         return ApiResponse.doError("not found")
@@ -431,6 +636,8 @@ def pom_delete_page(filename: str):
 
 @router.get("/pom/meta", response_model=ApiResponse)
 def pom_get_meta():
+    if TASKS_DIR is None:
+        return _no_ws()
     meta_f = _pom_dir() / '_meta.py'
     if not meta_f.exists():
         _regen_pom_init()
@@ -440,6 +647,8 @@ def pom_get_meta():
 
 @router.post("/pom/meta", response_model=ApiResponse)
 def pom_save_meta(req: PomMetaSaveRequest):
+    if TASKS_DIR is None:
+        return _no_ws()
     meta_f = _pom_dir() / '_meta.py'
     meta_f.write_text(_render_pom_meta(req.vars), encoding='utf-8')
     return ApiResponse.doSuccess({"saved": True})
@@ -447,6 +656,8 @@ def pom_save_meta(req: PomMetaSaveRequest):
 
 @router.post("/pom/install-skill", response_model=ApiResponse)
 def pom_install_skill():
+    if TASKS_DIR is None:
+        return _no_ws()
     src = Path(__file__).parent.parent / 'skills' / 'ha4t-case-writer' / 'SKILL.md'
     if not src.exists():
         return ApiResponse.doError("skill 模板缺失")
@@ -490,8 +701,13 @@ def pom_verify_selector(req: PomVerifySelectorRequest):
 
 @router.get("/tasks", response_model=ApiResponse)
 def list_tasks():
+    if TASKS_DIR is None:
+        return _no_ws()
     files = []
-    for p in sorted(TASKS_DIR.glob("*.py")):
+    for p in sorted(CASES_DIR.glob("*.py")):
+        # 跳过 conftest / 包 init / 下划线/点开头的临时与隐藏文件
+        if p.name in ("conftest.py", "__init__.py") or p.name.startswith(('_', '.')):
+            continue
         content = p.read_text(encoding="utf-8", errors='ignore')
         steps = _parse_py_steps(content)
         meta = _extract_meta(content)
@@ -511,7 +727,9 @@ class ReorderRequest(BaseModel):
 
 @router.get("/tasks/{filename:path}/meta", response_model=ApiResponse)
 def get_task_meta(filename: str):
-    path = TASKS_DIR / filename
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
     if not path.exists():
         return ApiResponse.doError("not found")
     content = path.read_text(encoding="utf-8")
@@ -528,7 +746,9 @@ def get_task_meta(filename: str):
 
 @router.post("/tasks/{filename:path}/reorder", response_model=ApiResponse)
 def reorder_task_v2(filename: str, req: ReorderRequest):
-    path = TASKS_DIR / filename
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
     if not path.exists():
         return ApiResponse.doError("not found")
     content = path.read_text(encoding="utf-8")
@@ -569,25 +789,11 @@ def reorder_task_v2(filename: str, req: ReorderRequest):
     return ApiResponse.doSuccess({"steps_count": n, "reordered": True})
 
 
-@router.get("/tasks/{filename:path}", response_model=ApiResponse)
-def load_task(filename: str):
-    path = TASKS_DIR / filename
-    if not path.exists():
-        return ApiResponse.doError(f"File not found: {filename}")
-    content = path.read_text(encoding="utf-8")
-    return ApiResponse.doSuccess({"filename": filename, "content": content})
-
-
-@router.post("/tasks/{filename:path}", response_model=ApiResponse)
-def save_task(filename: str, req: TaskSaveRequest):
-    path = TASKS_DIR / filename
-    path.write_text(req.content, encoding="utf-8")
-    return ApiResponse.doSuccess({"filename": filename, "saved": True})
-
-
 @router.get("/tasks/{filename:path}/project-id", response_model=ApiResponse)
 def get_project_id(filename: str):
-    path = TASKS_DIR / filename
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
     if not path.exists():
         return ApiResponse.doSuccess("")
     content = path.read_text(encoding="utf-8")
@@ -599,7 +805,9 @@ def get_project_id(filename: str):
 
 @router.post("/tasks/{filename:path}/cleanup-images", response_model=ApiResponse)
 def cleanup_task_images(filename: str):
-    path = TASKS_DIR / filename
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
     if not path.exists():
         return ApiResponse.doSuccess({"removed": 0})
     content = path.read_text(encoding="utf-8")
@@ -636,6 +844,10 @@ def cleanup_task_images(filename: str):
 @router.websocket("/ws/run")
 async def ws_run_task(ws: WebSocket):
     await ws.accept()
+    if TASKS_DIR is None:
+        await ws.send_json({"type": "error", "msg": "未选择工作区"})
+        await ws.close()
+        return
     try:
         raw = await ws.receive_text()
         req = json.loads(raw)
@@ -650,83 +862,39 @@ async def ws_run_task(ws: WebSocket):
 
     content = re.sub(r'\r?\n# --step--\r?\n', '\nprint("# --step--")\n# --step--\n', content)
 
-    tmpdir = Path(tempfile.mkdtemp())
-    tmppy = tmpdir / (filename or "untitled.py")
-    tmppy.write_text(content, encoding="utf-8")
+    # preamble：令 dev.click(image="x.png") 解析到 <workspace>/images
+    preamble = (
+        "import os as _os\n"
+        "from ha4t.config import global_config as _gc\n"
+        "_gc.current_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'images')\n"
+    )
+    content = preamble + content
 
-    # Copy referenced images to temp dir so the script can find them
-    meta = _extract_meta(content)
-    project_id = meta.get('project_id', '')
-    await ws.send_json({"type": "log", "text": f"[runner] project_id={project_id}, images_dir={IMAGES_DIR}"})
-    copied = 0
-    for line in content.split('\n'):
-        m = re.search(r'image=["\']([^"\']+)["\']', line)
-        if m:
-            img_name = m.group(1)
-            img_path = IMAGES_DIR / img_name
-            await ws.send_json({"type": "log", "text": f"[runner] checking image: {img_name} -> exists={img_path.exists()}"})
-            if img_path.exists():
-                try:
-                    shutil.copy(img_path, tmpdir / img_name)
-                    copied += 1
-                    await ws.send_json({"type": "log", "text": f"[runner] copied {img_name} to tmpdir"})
-                except Exception as e:
-                    await ws.send_json({"type": "log", "text": f"[runner] copy failed: {e}"})
-    await ws.send_json({"type": "log", "text": f"[runner] total copied: {copied}"})
-
-    # Copy referenced included task files (ha4t.include("xxx.py")) recursively
-    # so the subprocess can find them in cwd. Also copy any images those files
-    # reference. Cycle-safe via a visited set.
-    visited: set = set()
-    pending = [content]
-    inc_copied = 0
-    while pending:
-        text = pending.pop()
-        for line in text.split('\n'):
-            m = re.search(r'\binclude\(\s*["\']([^"\']+)["\']\s*\)', line)
-            if not m:
-                continue
-            ref = m.group(1)
-            if ref in visited:
-                continue
-            visited.add(ref)
-            src = TASKS_DIR / ref
-            if not src.exists():
-                await ws.send_json({"type": "log", "text": f"[runner] include source missing: {ref}"})
-                continue
-            try:
-                shutil.copy(src, tmpdir / ref)
-                inc_copied += 1
-                await ws.send_json({"type": "log", "text": f"[runner] copied include {ref} to tmpdir"})
-                sub_text = src.read_text(encoding="utf-8")
-                pending.append(sub_text)
-                # Also copy images referenced inside the included file
-                for sub_line in sub_text.split('\n'):
-                    im = re.search(r'image=["\']([^"\']+)["\']', sub_line)
-                    if im:
-                        img_name = im.group(1)
-                        img_path = IMAGES_DIR / img_name
-                        if img_path.exists() and not (tmpdir / img_name).exists():
-                            try:
-                                shutil.copy(img_path, tmpdir / img_name)
-                                await ws.send_json({"type": "log", "text": f"[runner] copied image {img_name} (via include)"})
-                            except Exception as e:
-                                await ws.send_json({"type": "log", "text": f"[runner] copy image failed: {e}"})
-            except Exception as e:
-                await ws.send_json({"type": "log", "text": f"[runner] copy include failed: {e}"})
-    if inc_copied:
-        await ws.send_json({"type": "log", "text": f"[runner] total includes copied: {inc_copied}"})
+    # 把运行文件写到工作区根 —— 让 `from pom import ...`/`include(...)`/__file__ 都按
+    # 工作区相对路径解析；运行后清掉。文件名带 pid+ts，避免并发碰撞、list_tasks 跳过。
+    run_file = TASKS_DIR / f".harun_{os.getpid()}_{int(time.time() * 1000)}.py"
+    run_file.write_text(content, encoding="utf-8")
 
     step_codes = _parse_py_steps(content)
     total = len(step_codes)
 
+    # PYTHONPATH：工作区根（pom 导入）+ 项目根（开发态 ha4t 源码树场景）。
+    project_root = Path(__file__).parent.parent.parent
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "").split(os.pathsep) if env.get("PYTHONPATH") else []
+    for p in [str(TASKS_DIR), str(project_root), str(project_root.parent)]:
+        if p not in existing:
+            existing.insert(0, p)
+    env["PYTHONPATH"] = os.pathsep.join(existing)
+
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(tmppy)],
-            cwd=str(tmpdir),
+            [sys.executable, "-u", str(run_file)],
+            cwd=str(TASKS_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            env=env,
         )
         step_idx = 0
         prev = None
@@ -753,7 +921,7 @@ async def ws_run_task(ws: WebSocket):
         await ws.send_json({"type": "error", "msg": str(e)})
     finally:
         try:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+            run_file.unlink(missing_ok=True)
         except Exception:
             pass
     await ws.close()
@@ -764,63 +932,44 @@ ALLURE_REPORTS_DIR = Path.home() / "Documents" / "HA4T" / "allure-reports"
 
 @router.post("/tasks/{filename:path}/run-allure")
 async def run_task_allure(filename: str):
-    """Run task via pytest + Allure, return report URL"""
-    task_path = TASKS_DIR / filename
+    """Run task via pytest + Allure, return report URL.
+
+    用例直接在工作区根运行：`from pom import ...`、`include(...)`、
+    `dev.click(image="x.png")` 全部按工作区相对路径解析。图片基准由工作区
+    `conftest.py`（pytest_configure 设 ``global_config.current_path``）负责。
+    """
+    if TASKS_DIR is None:
+        return _no_ws()
+    task_path = CASES_DIR / filename
     if not task_path.exists():
         return ApiResponse.doError(f"File not found: {filename}")
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="ha4t-allure-"))
+    # PYTHONPATH：工作区根（pom 导入）+ 项目根（开发态 ha4t 源码树场景）。
+    project_root = Path(__file__).parent.parent.parent
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "").split(os.pathsep) if env.get("PYTHONPATH") else []
+    for p in [str(TASKS_DIR), str(project_root), str(project_root.parent)]:
+        if p not in existing:
+            existing.insert(0, p)
+    env["PYTHONPATH"] = os.pathsep.join(existing)
+
+    result_dir = TASKS_DIR / "allure-results"
+    report_dir = TASKS_DIR / "allure-report"
     try:
-        run_file = tmpdir / filename
-        shutil.copy(task_path, run_file)
-
-        # Copy conftest.py to tmpdir
-        conftest_src = Path(__file__).parent.parent / "conftest.py"
-        if conftest_src.exists():
-            shutil.copy(conftest_src, tmpdir / "conftest.py")
-
-        # Copy referenced images
-        content = task_path.read_text("utf-8")
-        for line in content.split('\n'):
-            m = re.search(r'image=["\']([^"\']+)["\']', line)
-            if m:
-                img_name = m.group(1)
-                img_path = IMAGES_DIR / img_name
-                if img_path.exists():
-                    try:
-                        shutil.copy(img_path, tmpdir / img_name)
-                    except Exception:
-                        pass
-
-        # Add project root to PYTHONPATH for subprocess
-        project_root = Path(__file__).parent.parent.parent
-        env = os.environ.copy()
-        env.setdefault("PYTHONPATH", "")
-        paths = [str(project_root), str(project_root.parent)]
-        existing = env["PYTHONPATH"].split(os.pathsep) if env["PYTHONPATH"] else []
-        for p in paths:
-            if p not in existing:
-                existing.insert(0, p)
-        env["PYTHONPATH"] = os.pathsep.join(existing)
-
-        # Run pytest
-        result_dir = tmpdir / "allure-results"
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(run_file),
+            [sys.executable, "-m", "pytest", str(task_path),
              "--alluredir", str(result_dir), "--clean-alluredir",
              "-v", "--tb=short"],
-            cwd=str(tmpdir), capture_output=True, text=True, env=env
+            cwd=str(TASKS_DIR), capture_output=True, text=True, env=env,
         )
 
-        # Generate report
-        report_dir = tmpdir / "allure-report"
         allure_cmd = shutil.which("allure")
         report_url = ""
         if allure_cmd:
             subprocess.run(
                 [allure_cmd, "generate", str(result_dir),
                  "-o", str(report_dir), "--clean"],
-                capture_output=True, cwd=str(tmpdir)
+                capture_output=True, cwd=str(TASKS_DIR),
             )
             report_index = report_dir / "index.html"
             if report_index.exists():
@@ -839,8 +988,29 @@ async def run_task_allure(filename: str):
         })
     except Exception as e:
         return ApiResponse.doError(str(e))
-    finally:
-        try:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        except Exception:
-            pass
+
+
+# ── 注意：以下两个 catch-all 路由必须保持在文件末尾。 ──
+# FastAPI 用 `path` converter 时贪婪匹配剩余所有段；`/tasks/{filename:path}` 会吃下
+# `/tasks/foo.py/run-allure` 之类带后缀的 URL，必须等所有具体后缀路由先声明后再放这两个。
+
+
+@router.get("/tasks/{filename:path}", response_model=ApiResponse)
+def load_task(filename: str):
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
+    if not path.exists():
+        return ApiResponse.doError(f"File not found: {filename}")
+    content = path.read_text(encoding="utf-8")
+    return ApiResponse.doSuccess({"filename": filename, "content": content})
+
+
+@router.post("/tasks/{filename:path}", response_model=ApiResponse)
+def save_task(filename: str, req: TaskSaveRequest):
+    if TASKS_DIR is None:
+        return _no_ws()
+    path = CASES_DIR / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(req.content, encoding="utf-8")
+    return ApiResponse.doSuccess({"filename": filename, "saved": True})

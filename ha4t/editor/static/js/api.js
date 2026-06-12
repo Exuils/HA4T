@@ -214,3 +214,34 @@ export async function pomVerifySelector(payload) {
   });
   return checkResponse(response);
 }
+
+// ── Workspace / FS browse ────────────────────────────────────────
+
+export async function getWorkspace() {
+  const response = await fetch(`${API_HOST}workspace`);
+  return checkResponse(response);
+}
+
+export async function openWorkspace(path) {
+  const response = await fetch(`${API_HOST}workspace/open`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  });
+  return checkResponse(response);
+}
+
+export async function initWorkspace(parent, name) {
+  const response = await fetch(`${API_HOST}workspace/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parent, name })
+  });
+  return checkResponse(response);
+}
+
+export async function fsList(path) {
+  const url = `${API_HOST}fs/list?path=${encodeURIComponent(path || '')}`;
+  const response = await fetch(url);
+  return checkResponse(response);
+}

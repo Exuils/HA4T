@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 import os
 import webbrowser
@@ -49,7 +49,18 @@ def open_browser(port):
     webbrowser.open_new(f"http://127.0.0.1:{port}")
 
 
-def run(port=8000):
+def run(port=8000, workspace=None):
+    if workspace:
+        # 提前置入工作区，避免 gate；失败仅打印告警，serve 继续。
+        from ha4t.editor._config import EditorConfig
+        from ha4t.editor.routers import api as _api
+        try:
+            EditorConfig().set_workspace(workspace)
+        except ValueError as e:
+            print(f"[ha4t] --workspace 忽略：{e}")
+        else:
+            _api._refresh_paths()
+
     timer = threading.Timer(1.0, open_browser, args=[port])
     timer.daemon = True
     timer.start()
@@ -58,4 +69,9 @@ def run(port=8000):
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser(prog="ha4t.editor", description="HA4T editor server")
+    parser.add_argument("-p", "--port", type=int, default=8000, help="HTTP 端口（默认 8000）")
+    parser.add_argument("-w", "--workspace", default=None, help="预选工作区目录（绝对路径，必须已存在）")
+    args = parser.parse_args()
+    run(port=args.port, workspace=args.workspace)

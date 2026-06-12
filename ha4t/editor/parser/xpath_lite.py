@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
 
-"""XPathLite — 最短稳定 xpath 生成器。
+"""XPathLite — 最短稳定 xpath 生成器（前后端同算法）。
 
-算法目标：在保证**唯一匹配**的前提下输出最短表达式，并尽量避开脆弱的父子路径。
+前端真值源：``ha4t/editor/static/js/utils/xpathLite.js``；这份是 Python 镜像，供
+`/parser/xpath-lite` 端点与离线工具消费。两份必须保持算法/输出完全等价；改一份
+一定同步另一份，并跑 ``tests/test_xpath_lite.py`` 对齐验收。
 
 策略（按短→长枚举候选，第一个唯一的就返回）：
   1. 单属性    : //*[@resource-id="X"]
   2. type+单属 : //android.widget.Button[@text="X"]
   3. 双属性    : //*[@resource-id="X" and @text="Y"]
-  4. 祖先锚定  : //*[@resource-id="P"]//Class[@text="X"]      ← // 后代轴
-  5. 全路径兜 : //Root/Layout[1]/.../View[3]                 ← / 子轴（最后才用）
+  4. 祖先锚定  : //*[@resource-id="P"]//Class[@text="X"]   ← 目标有属性 → // 后代轴
+                //*[@resource-id="P"]/Type[i]/.../Type[j]  ← 目标无属性 → / 子轴 + 每段 [idx]
+  5. 全路径兜 : //Root[1]/.../View[1]                       ← / 子轴 + 每段 [idx]
 
-关键 trick：层级拼接用 `//` 而不是 `/`，中间多/少一层 wrapper view 都不影响匹配，
-这是避免"脆弱路径"的核心 —— 旧实现一律用 `/` 子轴，UI 改一行 padding wrapper
-就整条失效。
+关键 trick：anchor 之下，**只要目标有属性就用 `//` 后代轴**（中间多/少 wrapper 不影响匹配，
+反脆弱）；**目标无任何属性**时改走 anchor → 目标的 `/` 子轴绝对路径、每段强制带 sibling
+索引 —— `//Type[idx]` 在 `//` 后是 position 过滤（跨分支歧义匹配），必须避免。
+Tier 5 同理：全段都带 [idx]（同类唯一也补 [1]），让 XPath 引擎一致定位。
 
 时间复杂度：O(N) 建索引（仅 __init__ 一次），单次 get_xpathLite 查询 O(K)
 （K=候选属性数，恒定小常数）+ 索引 O(1) 哈希查找；实际 ~1ms 量级。
@@ -132,50 +136,55 @@ class XPathLiteGenerator:
                 if self._matches_count(preds) == 1:
                     return self._expr(None, preds)
 
-        # Tier 4 — 锚定到"有唯一属性"的最近祖先 + 用 `//` 后代轴拼到目标。
-        # 这是关键的反脆弱手段：中间多几层 wrapper view 也不影响匹配。
+        # Tier 4 — 锚定到"有唯一属性"的最近祖先 + 子轴拼到目标（反脆弱当目标自身有属性时）
         ancestor = self._node_map.get(node.get('_parentId') or '')
         while ancestor:
             anc_attrs = [(a, ancestor[a]) for a in self._priority if ancestor.get(a)]
             for attr, value in anc_attrs:
                 if not self._is_unique(attr, value):
                     continue
-                # 祖先锚定后，目标自己用最强属性 / type 表达即可（不必再保证全局唯一）
-                tail_expr = self._tail_for_anchor(node, own_attrs, own_type)
+                tail_expr = self._tail_for_anchor(node, own_attrs, own_type, ancestor)
                 return self._expr(None, [(attr, value)]) + tail_expr
             ancestor = self._node_map.get(ancestor.get('_parentId') or '')
 
         # Tier 5 — 兜底：从根开始的 / 子轴绝对路径（脆弱，仅在前 4 层都拿不到时使用）
         return self._build_from_root(node)
 
-    def _tail_for_anchor(self, node: Dict, own_attrs: List, own_type: str) -> str:
-        """祖先已经唯一后，自己用属性 + // 拼接 — 后代轴对中间层数不敏感。"""
+    def _tail_for_anchor(self, node: Dict, own_attrs: List, own_type: str, ancestor: Dict) -> str:
+        """祖先已经唯一后，自己用属性 + // 拼接；无任何属性时改走 anchor → target 的 / 子轴绝对路径。"""
         if own_attrs:
-            # type + 第一个属性就够稳了，不再叠多个谓词（短优先）
             attr, value = own_attrs[0]
             head = own_type if own_type else '*'
             return f'//{head}[@{_ATTR_NAME[attr]}={_xpath_escape(value)}]'
-        # 完全无属性的节点：fallback 到 type + 同类兄弟 index
-        idx = self._sibling_index(node)
-        head = own_type or '*'
-        if idx is None:
-            return f'//{head}'
-        return f'//{head}[{idx}]'
+        # 完全无属性的节点：`//Type[idx]` 在 `//` 后是 position 过滤，会跨分支匹配多个，
+        # 改用 anchor → target 的子轴绝对路径，每段必带 sibling 索引，保证唯一。
+        return self._child_path_from_ancestor_to(ancestor, node)
 
-    def _sibling_index(self, node: Dict) -> Optional[int]:
-        """在 parent.children 中按 _type 同类排第几（1-based）；无父返回 None。"""
-        parent = self._node_map.get(node.get('_parentId') or '')
-        if not parent:
-            return None
-        same_type = [s for s in parent.get('children', []) if s.get('_type') == node.get('_type')]
-        try:
-            return same_type.index(node) + 1
-        except ValueError:
-            return None
+    def _child_path_from_ancestor_to(self, ancestor: Dict, node: Dict) -> str:
+        """沿 _parentId 从 node 回溯到 ancestor（不含），构造 /Type[idx]/.../Type[idx]。"""
+        segments: List[str] = []
+        cur = node
+        while cur is not None and cur is not ancestor:
+            parent = self._node_map.get(cur.get('_parentId') or '')
+            if parent is None:
+                break
+            same_type = [s for s in parent.get('children', []) if s.get('_type') == cur.get('_type')]
+            head = cur.get('_type') or '*'
+            try:
+                idx = same_type.index(cur) + 1
+            except ValueError:
+                idx = 1
+            segments.append(f'{head}[{max(idx, 1)}]')
+            cur = parent
+        if not segments:
+            return ''
+        segments.reverse()
+        return '/' + '/'.join(segments)
+
 
     def _build_from_root(self, node: Dict) -> str:
-        """全路径兜底 — 同类兄弟唯一时省 [index]。"""
-        segments = []
+        """全路径兜底 — 每段都带 sibling index，避免 `//Type[idx]` 在多分支下歧义。"""
+        segments: List[str] = []
         cur = node
         while cur is not None:
             parent = self._node_map.get(cur.get('_parentId') or '')
@@ -183,10 +192,11 @@ class XPathLiteGenerator:
                 break
             same_type = [s for s in parent.get('children', []) if s.get('_type') == cur.get('_type')]
             head = cur.get('_type') or '*'
-            if len(same_type) <= 1:
-                segments.append(head)
-            else:
-                segments.append(f'{head}[{same_type.index(cur) + 1}]')
+            try:
+                idx = same_type.index(cur) + 1
+            except ValueError:
+                idx = 1
+            segments.append(f'{head}[{max(idx, 1)}]')
             cur = parent
         segments.reverse()
         return '//' + '/'.join(segments) if segments else ''

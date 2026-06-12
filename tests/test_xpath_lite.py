@@ -126,8 +126,32 @@ class TestXPathLiteAndroid(unittest.TestCase):
         self.assertIn('//', xp[len('//*[@resource-id="com.x:id/list_a"]'):])
         self.assertIn('@text="item"', xp)
 
+    def test_tier4_no_attr_target_uses_child_path_not_descendant_idx(self):
+        """回归：目标节点完全无属性、anchor 下有多个同类兄弟 View[1] 风险情境。
+
+        旧实现给 `//*[@resource-id="android:id/content"]//View[1]` —— `//View[1]` 在 `//` 后
+        是 position 过滤，跨分支匹配每个父级里的第 1 个 View，导致用户"点的"和"高亮的"不一致。
+        新实现应改走 anchor → target 的 `/` 子轴绝对路径，每段带 sibling 索引。
+        """
+        target = _node('android.view.View')                 # 完全无属性
+        sibling_a = _node('android.view.View')
+        sibling_b = _node('android.view.View')
+        content = _node('FrameLayout', resourceId='android:id/content',
+                        children=[sibling_a, target, sibling_b])
+        tree = _link(_node('Root', children=[content]))
+        xp = self._gen(tree).get_xpathLite(target['_id'])
+
+        # 锚到 content
+        self.assertTrue(xp.startswith('//*[@resource-id="android:id/content"]'), xp)
+        tail = xp[len('//*[@resource-id="android:id/content"]'):]
+        # 关键：tail 必须是 `/` 子轴 + 带 sibling 索引；绝不能是 `//Type[idx]`
+        self.assertFalse(tail.startswith('//'), f'tail 走了后代轴会歧义: {xp}')
+        self.assertTrue(tail.startswith('/android.view.View['), xp)
+        # target 在 content.children 中位置是 1（0-based sibling_a） → sameType index = 1（0-based） → xpath [2]
+        self.assertIn('/android.view.View[2]', xp, xp)
+
     def test_tier5_fallback_root_path(self):
-        """完全无属性 + 无唯一祖先 → / 子轴全路径兜底。"""
+        """完全无属性 + 无唯一祖先 → / 子轴全路径兜底，每段强制带 sibling 索引以避免 `//Type[idx]` 歧义。"""
         deep = _node('View')
         tree = _link(_node('Root', children=[
             _node('Layout', children=[
@@ -135,10 +159,11 @@ class TestXPathLiteAndroid(unittest.TestCase):
             ]),
         ]))
         xp = self._gen(tree).get_xpathLite(deep['_id'])
-        # `//` 已是"任意起点"语义，前缀加不加 Root 都能命中 — 实现选短的
         self.assertTrue(xp.startswith('//'))
-        self.assertTrue(xp.endswith('/View'))
-        self.assertEqual(xp.count('/Layout'), 2)
+        # 末段是 View[1]（同类兄弟唯一也补 [1]，保证 XPath 引擎一致定位）
+        self.assertTrue(xp.endswith('/View[1]'), xp)
+        # 两层 Layout 嵌套，segment 顺序 Layout[1]/Layout[1] 或 Layout[i]/Layout[j]
+        self.assertEqual(xp.count('/Layout['), 2, xp)
 
     def test_returns_empty_for_unknown_id(self):
         tree = _link(_node('Root', children=[_node('A')]))

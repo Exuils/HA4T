@@ -1,4 +1,6 @@
 import { reorderTask } from '../api.js';
+import { fileNameFromName } from '../composables/useTask.js';
+import KvRow from './KvRow.js';
 
 const { inject, ref, computed, nextTick, watch } = Vue;
 
@@ -200,11 +202,15 @@ const TEMPLATE = `
         <span class="drawer-arrow">{{ localVarsOpen ? '▼' : '▲' }}</span>
       </div>
       <div class="drawer-body" v-show="localVarsOpen">
-        <div class="kv-row" v-for="(v, k) in task.localVars.value" :key="k">
-          <el-input :model-value="k" @change="nk => renameLocalVar(k, nk)" size="small" class="kv-key"></el-input>
-          <el-input :model-value="v" @update:modelValue="nv => setLocalVar(k, nv)" @blur="saveTaskDebounced" size="small" class="kv-val"></el-input>
-          <el-button text size="small" @click="deleteLocalVar(k)"><el-icon><Close /></el-icon></el-button>
-        </div>
+        <KvRow
+          v-for="(_, k) in task.localVars.value"
+          :key="k"
+          :key-name="k"
+          v-model="task.localVars.value[k]"
+          @rename="renameLocalVar"
+          @remove="deleteLocalVar(k)"
+          @value-blur="saveTaskDebounced"
+        ></KvRow>
         <div class="kv-empty" v-if="Object.keys(task.localVars.value).length === 0">空 — 本用例独有的常量（账号 / 文案 / 时间戳种子等）</div>
         <el-button text size="small" @click="addLocalVar" class="kv-add-btn"><el-icon><Plus /></el-icon> 添加</el-button>
       </div>
@@ -312,6 +318,7 @@ const TEMPLATE = `
                 <span v-else-if="statusOf(name) === 'not_found'" class="pom-el-status-tag tag-notfound"
                     :title="(verify.results.value[name] && verify.results.value[name].error) || ''">未找到</span>
               </template>
+              <el-button size="small" v-if="!(sel && sel.image)" @click="verify.flashOne(name, sel)" title="高亮 3 秒"><el-icon><View /></el-icon></el-button>
               <el-button size="small" @click="beginEditElement(name, sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
               <el-button size="small" @click="pom.removeElement(name)" title="删除"><el-icon><Close /></el-icon></el-button>
             </div>
@@ -360,11 +367,15 @@ const TEMPLATE = `
         <span class="drawer-arrow">{{ globalVarsOpen ? '▼' : '▲' }}</span>
       </div>
       <div class="drawer-body" v-show="globalVarsOpen">
-        <div class="kv-row" v-for="(v, k) in pom.metaVars.value" :key="k">
-          <el-input :model-value="k" @change="nk => renameMetaVar(k, nk)" size="small" class="kv-key"></el-input>
-          <el-input :model-value="v" @update:modelValue="nv => setMetaVar(k, nv)" @blur="pom.saveMeta" size="small" class="kv-val"></el-input>
-          <el-button text size="small" @click="deleteMetaVar(k)"><el-icon><Close /></el-icon></el-button>
-        </div>
+        <KvRow
+          v-for="(_, k) in pom.metaVars.value"
+          :key="k"
+          :key-name="k"
+          v-model="pom.metaVars.value[k]"
+          @rename="renameMetaVar"
+          @remove="deleteMetaVar(k)"
+          @value-blur="pom.saveMeta"
+        ></KvRow>
         <div class="kv-empty" v-if="Object.keys(pom.metaVars.value).length === 0">空 — 点 + 添加（如 package / base_url / username）</div>
         <el-button text size="small" @click="addMetaVar" class="kv-add-btn"><el-icon><Plus /></el-icon> 添加</el-button>
       </div>
@@ -459,6 +470,7 @@ const TEMPLATE = `
 export default {
   name: 'StepPane',
   template: TEMPLATE,
+  components: { KvRow },
 
   setup() {
     const task   = inject('task');
@@ -588,11 +600,26 @@ export default {
     async function openFolder() {
       await fetch('/tasks/open-folder', { method: 'POST' }).catch(() => {});
     }
-    function applySettings() {
+    async function applySettings() {
       task.settingsVisible.value = false;
+      // 新建用例：文件名由用例名推导（fileNameFromName，单一来源）。
+      // 若同名文件已存在，覆盖前二次确认；用户取消则中止保存。
       if (!task.currentYamlFile.value) {
-        const safe = (task.taskName.value || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
-        task.currentYamlFile.value = safe + '.py';
+        const candidate = fileNameFromName(task.taskName.value || '新建用例');
+        const clash = (task.yamlFiles.value || []).some(f => f.filename === candidate);
+        if (clash) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `用例「${candidate}」已存在，继续将覆盖原文件。是否覆盖？`,
+              '文件已存在',
+              { type: 'warning', confirmButtonText: '覆盖', cancelButtonText: '取消' },
+            );
+          } catch (e) {
+            task.settingsVisible.value = true;  // 取消：留在设置弹窗，便于改名
+            return;
+          }
+        }
+        task.currentYamlFile.value = candidate;
       }
       task.saveCurrentTask(device.serial.value).catch(() => {});
       task.refreshYamlFiles();
@@ -696,6 +723,11 @@ export default {
       cliPlaceholder.value = item.desc;
       if (item.action === 'key' || item.action === 'include') {
         nextTick(() => onCliInput());
+      } else if (item.action === 'launchapp') {
+        // 切到 launchapp 子菜单：先把应用列表拉回来（已有缓存则秒返回），再展开 slash 候选。
+        console.debug('[pickSlash] launchapp; loadApps?', typeof task.loadApps);
+        const p = (task.loadApps && task.loadApps(device.platform.value, device.serial.value, msg)) || Promise.resolve();
+        Promise.resolve(p).then(() => nextTick(() => onCliInput()));
       } else {
         slashVisible.value = false;
       }
@@ -803,7 +835,8 @@ export default {
       }, 400);
     }
     function setLocalVar(k, v) {
-      task.localVars.value = { ...task.localVars.value, [k]: v };
+      task.localVars.value[k] = v;
+      saveTaskDebounced();
     }
     function renameLocalVar(oldK, newK) {
       if (!newK || newK === oldK) return;
@@ -814,20 +847,20 @@ export default {
       saveTaskDebounced();
     }
     function deleteLocalVar(k) {
-      const next = { ...task.localVars.value };
-      delete next[k];
-      task.localVars.value = next;
+      delete task.localVars.value[k];
       saveTaskDebounced();
     }
     function addLocalVar() {
       let i = 1, k = 'var1';
       while (Object.prototype.hasOwnProperty.call(task.localVars.value, k)) { i++; k = 'var' + i; }
-      task.localVars.value = { ...task.localVars.value, [k]: '' };
+      task.localVars.value[k] = '';
       saveTaskDebounced();
     }
 
+    // 全局 VARS（pom/_meta.py）同模式：mutate 优先，避免按键卡顿。
     function setMetaVar(k, v) {
-      pom.metaVars.value = { ...pom.metaVars.value, [k]: v };
+      pom.metaVars.value[k] = v;
+      pom.saveMeta();
     }
     function renameMetaVar(oldK, newK) {
       if (!newK || newK === oldK) return;
@@ -838,15 +871,13 @@ export default {
       pom.saveMeta();
     }
     function deleteMetaVar(k) {
-      const next = { ...pom.metaVars.value };
-      delete next[k];
-      pom.metaVars.value = next;
+      delete pom.metaVars.value[k];
       pom.saveMeta();
     }
     function addMetaVar() {
       let i = 1, k = 'var1';
       while (Object.prototype.hasOwnProperty.call(pom.metaVars.value, k)) { i++; k = 'var' + i; }
-      pom.metaVars.value = { ...pom.metaVars.value, [k]: '' };
+      pom.metaVars.value[k] = '';
       pom.saveMeta();
     }
 

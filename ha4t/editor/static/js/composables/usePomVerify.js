@@ -76,5 +76,38 @@ export function usePomVerify({ pom, device, msg }) {
     if (verifyMode.value) _scanOnce();
   }
 
-  return { verifyMode, results, beginVerify, endVerify, onHierarchyUpdated };
+  // ── 单元素临时高亮（持续 N 毫秒，不进入 verify 模式） ─────────────────
+  // 列表行的「高亮」按钮调用：调一次后端定位 → 在 canvas overlay 上画 3s 方框，
+  // 不污染 results / verifyMode。 image 元素后端不支持，前端直接拒绝。
+  let _flashTimer = null;
+  async function flashOne(name, sel, durationMs = 3000) {
+    if (!sel) { msg.warn('元素 selector 为空'); return; }
+    if (_isManualOnly(sel)) { msg.warn('图像元素需在设备上手工验证'); return; }
+    const platform = device.platform.value;
+    const serial   = device.serial.value;
+    if (!platform || !serial) { msg.warn('设备未连接'); return; }
+
+    try {
+      const res = await pomVerifySelector({ platform, serial, selector: sel });
+      if (!res.success) { msg.error(res.message || '定位失败'); return; }
+      if (res.data.platform_supported === false) { msg.warn('当前平台不支持元素查找'); return; }
+      if (!res.data.found || !res.data.rect) { msg.warn(`未找到: ${name}`); return; }
+
+      // 直接戳 window 变量（绕过 verifyMode）—— App.js 的 watch 不会清零，因为我们
+      // 没动 verify.results / verifyMode；timer 结束时按当前 verifyMode 还原。
+      const overlay = { [name]: { status: 'found', rect: res.data.rect, error: null } };
+      window._pomVerifyResults = overlay;
+      if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+
+      clearTimeout(_flashTimer);
+      _flashTimer = setTimeout(() => {
+        window._pomVerifyResults = verifyMode.value ? results.value : null;
+        if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+      }, durationMs);
+    } catch (e) {
+      msg.error('高亮失败: ' + (e.message || e));
+    }
+  }
+
+  return { verifyMode, results, beginVerify, endVerify, onHierarchyUpdated, flashOne };
 }
