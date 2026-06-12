@@ -144,10 +144,12 @@ export function usePom() {
       const rid = node.resourceId || '';
       if (rid) suggested = rid.split(/[:/]/).pop() || '';
     }
-    // 仅保留：中英文字母 / 数字 / 下划线；其他符号 / 空白挤压成下划线，再去首尾下划线。
+    // 清理：与 _validName 对齐 —— 只剥掉控制字符 / 换行 / 制表符与首尾空白；
+    // 中文标点 / 括号 / 空格中部一律保留，让用户能按原文识别。
     pendingName.value = (suggested || '')
-      .replace(/[^A-Za-z0-9_\u4e00-\u9fff]+/g, '_')
-      .replace(/^_+|_+$/g, '');
+      .replace(/[\x00-\x1f\x7f\u2028\u2029]+/g, ' ')   // 控制字符压成普通空格
+      .replace(/\s+/g, ' ')                            // 连续空白压一个，去掉换行
+      .trim();
     nameDialogVisible.value = true;
   }
 
@@ -180,14 +182,25 @@ export function usePom() {
     return out;
   }
 
+  // 元素名校验 —— 元素名最终落在 pom/<page>.py 里 ELEMENTS dict 的 string key
+  // （`{k!r}: {v!r}` 自动转义任何字符），不参与 Python 标识符匹配，**不会引发代码语法错误**。
+  // 因此校验目的只在 UX：不允许会导致"看不见/不能粘贴回去/格式错乱"的内容。
+  //
+  // 允许：中文/字母/数字/下划线、空格、中英文标点、引号、括号、emoji 等任意可见 Unicode；
+  //       数字开头也允许（dict key 没有标识符限制）。
+  // 禁止：空字符串、全空白、首尾留白（自动 trim 后判）、控制字符、换行、制表符 ——
+  //       这些字面合法但会破坏 ELEMENTS 列表的视觉对齐 / repr 难读 / 不可见字符引发"找不到 key"。
   function _validName(name) {
-    return /^(?![0-9])[A-Za-z0-9_\u4e00-\u9fff]+$/.test(name);
+    if (!name || typeof name !== 'string') return false;
+    if (name.trim() !== name) return false;          // 首尾空白
+    if (!name.length) return false;                  // 全空
+    return !/[\x00-\x1f\x7f\u2028\u2029]/.test(name); // 控制字符 / 换行 / 制表 / U+2028/2029
   }
 
   function confirmCapture(msg) {
     const name = (pendingName.value || '').trim();
     if (!_validName(name)) {
-      _msgError(msg, '元素名只能包含中文/字母/数字/下划线，且不能数字开头');
+      _msgError(msg, '元素名不能为空，且不可包含换行、制表符或其它控制字符');
       return;
     }
     if (Object.prototype.hasOwnProperty.call(elements.value, name)) {
@@ -211,7 +224,7 @@ export function usePom() {
   function updateElement(oldName, newName, newSelector, msg) {
     const nn = (newName || '').trim();
     if (!_validName(nn)) {
-      _msgError(msg, '元素名只能包含中文/字母/数字/下划线，且不能数字开头');
+      _msgError(msg, '元素名不能为空，且不可包含换行、制表符或其它控制字符');
       return false;
     }
     if (nn !== oldName && Object.prototype.hasOwnProperty.call(elements.value, nn)) {
