@@ -5,12 +5,12 @@
 
 HA4T (Hybrid App For Testing Tool)
 是一个跨平台的UI自动化框架，适用于混合型app、web和原生app等。该框架基于airtest
-aircv模块、飞浆OCR、WS、uiautomator2和facebook_wda进行开发。
+aircv模块、飞浆OCR、WS、uiautomator2、facebook_wda 和 HarmonyOS hmdriver 进行开发。
 (目前仅个人开发和使用，可能存在一些问题~)
 
 ## 特性
 
-- 跨平台支持：适用于iOS、Android和Web应用
+- 跨平台支持：适用于 Android、iOS、HarmonyOS NEXT 和 Web 应用
 - 多种定位方式：支持图像识别、OCR文字识别、webview定位、原生控件定位等
 - 灵活的操作API：提供点击、滑动、输入等常用操作
 

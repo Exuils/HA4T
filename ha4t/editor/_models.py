@@ -30,8 +30,6 @@ class BaseHierarchy(BaseModel):
     jsonHierarchy: Optional[Dict] = None
     windowSize: Tuple[int, int]
     scale: int = 1
-    activityName: Optional[str] = None
-    packageName: Optional[str] = None
 
 
 class XPathLiteRequest(BaseModel):

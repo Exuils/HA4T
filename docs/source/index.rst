@@ -5,16 +5,17 @@
 欢迎使用 HA4T 文档!
 ================================
 
-HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台。它提供了简单易用的 API，让您能够快速编写和执行自动化测试脚本。
+HA4T (Hybrid App For Testing Tool) 是一个跨平台的 UI 自动化测试框架，支持 Android、iOS 和 HarmonyOS NEXT，同时擅长处理混合型 App 中的 WebView。它提供面向对象的简洁 API，让您能够快速编写并执行自动化测试脚本。
 
 主要特性:
 
-- 支持 Android 和 iOS 平台
-- 提供直观的元素定位和操作 API  
-- 内置 OCR 文字识别功能
-- 支持图像识别和模板匹配
-- 集成 CDP 调试功能，支持 Web 应用测试
-- 丰富的辅助功能，如截图、日志记录等
+- 跨平台支持：Android、iOS、HarmonyOS NEXT 以及 WebView
+- 多种定位方式：OCR 文字识别、图像/模板匹配、原生控件属性、XPath、WebView(CDP) 定位
+- 面向对象 API：``connect()`` 返回 ``Device`` 实例，统一封装点击、滑动、输入、断言等操作
+- 内置 OCR 文字识别（飞桨 PaddleOCR，懒加载）
+- 多设备并行：每个 ``Device`` 持有独立配置，天然支持多线程并行测试
+- 用例步骤复用：``include()`` 在同一进程内复用其他用例文件
+- 丰富的辅助功能：截图、文件传输、日志记录等
 
 快速开始
 ---------
@@ -37,11 +38,19 @@ HA4T 是一个强大的 UI 自动化测试框架，支持 Android 和 iOS 平台
 
 .. toctree::
    :maxdepth: 4
-   :caption: 配置
+   :caption: 核心 API
 
+   modules/ha4t
    modules/ha4t.config
+   modules/ha4t.exceptions
 
 ================================
+
+.. toctree::
+   :maxdepth: 4
+   :caption: 设备驱动
+
+   modules/ha4t.drivers
 
 ================================
 

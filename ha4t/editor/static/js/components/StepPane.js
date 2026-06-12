@@ -1,202 +1,377 @@
 import { reorderTask } from '../api.js';
 
-const { inject, ref, nextTick, watch } = Vue;
+const { inject, ref, computed, nextTick, watch } = Vue;
 
+// StepPane — 最右栏（grid-area: center），即「编辑器」面板，顶部 2 个 outer tab：
+//   • caseEdit（用例编辑，默认）—— 原步骤列表 + CLI + 日志
+//   • pom（POM 采集）—— 上=工具栏/page 选择/按钮组 中=元素列表 下=变量
+// 中间栏（grid-area: right）= InspectorPane，不随 tab 变化。
+// caseEdit 用 v-show 保留 DOM（Sortable 在 mounted 绑 stepList，destroy 会丢监听）。
 const TEMPLATE = `
 <div class="center">
-  <!-- Editor Toolbar -->
-  <div class="editor-toolbar">
-    <el-select v-model="task.currentYamlFile.value" placeholder="选择用例文件" size="small"
-        style="flex:1;" @change="onFileChange" clearable>
-      <el-option v-for="f in task.yamlFiles.value" :key="f.filename" :label="f.name" :value="f.filename">
-        <span>{{ f.name }}</span>
-        <span style="float:right;color:#8492a6;font-size:11px">{{ f.step_count }} 步 | {{ f.platform }}</span>
-      </el-option>
-    </el-select>
-    <el-tooltip content="刷新文件列表" placement="top">
-      <el-button size="small" circle @click="task.refreshYamlFiles()">
-        <el-icon><Refresh /></el-icon>
-      </el-button>
-    </el-tooltip>
-    <el-tooltip content="新建用例" placement="top">
-      <el-button size="small" @click="newFile">
-        <el-icon><CirclePlus /></el-icon>
-      </el-button>
-    </el-tooltip>
-    <el-tooltip content="打开文件夹" placement="top">
-      <el-button size="small" @click="openFolder">
-        <el-icon><Document /></el-icon>
-      </el-button>
-    </el-tooltip>
-    <el-dropdown @command="handleRunCommand" :disabled="!device.isConnected.value || !task.steps.value.length" trigger="click">
-      <el-button size="small" type="success">
-        <el-icon><CircleCheck /></el-icon>
-        全部运行
-        <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-      </el-button>
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item command="run">运行</el-dropdown-item>
-          <el-dropdown-item command="run-allure">运行 + Allure 报告</el-dropdown-item>
-        </el-dropdown-menu>
-      </template>
-    </el-dropdown>
-    <el-tooltip content="清理未引用图片" placement="top">
-      <el-button size="small" :disabled="!task.projectId.value" @click="task.cleanupTaskImages(msg)">
-        <el-icon><Delete /></el-icon>
-      </el-button>
-    </el-tooltip>
-    <el-tooltip content="设置" placement="top">
-      <el-button size="small" @click="task.settingsVisible.value = true">
-        <el-icon><Setting /></el-icon>
-      </el-button>
-    </el-tooltip>
-    <el-switch v-model="task.autoRun.value" active-text="自动运行" inactive-text="手动" size="small" style="margin-left:4px;"></el-switch>
+  <div class="inspector-tabs">
+    <button :class="['itab', outerTab === 'caseEdit' ? 'active' : '']"
+        @click="outerTab = 'caseEdit'">用例编辑</button>
+    <button :class="['itab', outerTab === 'pom' ? 'active' : '']"
+        @click="onSwitchPom">POM 采集</button>
   </div>
 
-  <!-- Meta bar -->
-  <div class="editor-meta">
-    <span class="meta-item">平台: <b>{{ task.taskPlatform.value }}</b></span>
-    <span class="meta-item" v-if="task.taskName.value">名称: <b>{{ task.taskName.value }}</b></span>
-    <span class="meta-item">步骤: <b>{{ task.steps.value.length }}</b></span>
-  </div>
-
-  <!-- Step list -->
-  <div class="step-list" ref="stepList">
-    <div v-if="task.steps.value.length === 0" class="step-empty">
-      在下方输入命令, 或按 <b>/</b> 选择动作
-    </div>
-    <div v-for="(s, i) in task.steps.value" :key="i"
-        :class="['step-row',
-                 s._type === 'imglocate' ? 'step-img' : '',
-                 s._type === 'include' ? 'step-include' : '',
-                 { 'step-selected': task.selectedStepIndex.value === i }]"
-        @click="task.selectStep(i)" style="position:relative">
-      <!-- Remark strip — full-width row above step content -->
-      <div v-if="s.remark" class="step-remark">
-        <span class="step-remark-icon">#</span>{{ s.remark }}
-      </div>
-      <!-- Drag handle -->
-      <span class="step-drag-handle"><el-icon><Rank /></el-icon></span>
-
-      <!-- Include step: flat layout — header items participate in step-row's flex,
-           body uses flex-basis:100% so it wraps below when expanded. Collapsed
-           state has no body node at all — identical height to a regular row. -->
-      <template v-if="s._type === 'include'">
-        <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
-        <span class="step-num">{{ i + 1 }}.</span>
-        <span class="inc-step-badge">引用</span>
-        <span class="inc-step-name" :title="s.includeFile">{{ s.includeFile }}</span>
-        <span class="inc-step-count" v-if="s._includedSteps">({{ s._includedSteps.length }} 步)</span>
-        <div class="step-btns">
-          <button class="sb" @click.stop="toggleInclude(i)" :title="s._open ? '收起' : '展开'">{{ s._open ? '▾' : '▸' }}</button>
-          <button class="sb" @click.stop="openIncludedFile(s.includeFile)" title="打开该用例编辑">E</button>
-          <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
-        </div>
-        <div v-if="s._open" class="inc-step-body">
-          <div v-if="s._loading" class="inc-step-loading">加载中…</div>
-          <div v-else-if="!s._includedSteps || !s._includedSteps.length" class="inc-step-empty">（该用例没有步骤）</div>
-          <ol v-else class="inc-step-list">
-            <li v-for="(c, j) in s._includedSteps" :key="j" class="inc-step-item">
-              <span class="inc-sub-num">{{ j + 1 }}.</span>
-              <span v-if="c.remark" class="inc-sub-remark">#{{ c.remark }}</span>
-              <code class="inc-sub-code">{{ c.code }}</code>
-            </li>
-          </ol>
-        </div>
-      </template>
-
-      <!-- Regular step -->
-      <template v-else-if="s._type !== 'imglocate'">
-        <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
-        <span class="step-num">{{ i + 1 }}.</span>
-        <code class="step-code">{{ s.code }}</code>
-        <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
-        <div class="step-btns">
-          <button class="sb" @click.stop="runFromHere(i)" title="从此步运行">&#9654;</button>
-          <button class="sb" @click.stop="runSingle(i)" title="仅此步">&#9654;&#9654;</button>
-          <button class="sb" @click.stop="copyStep(i)" title="复制代码">C</button>
-          <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
-        </div>
-        <!-- Collapsible failure detail -->
-        <template v-if="s._detail">
-          <div class="step-detail-toggle" @click.stop="s._detailOpen = !s._detailOpen">
-            详情 {{ s._detailOpen ? '▴' : '▾' }}
-          </div>
-          <pre v-if="s._detailOpen" class="step-detail-block">{{ s._detail }}</pre>
+  <!-- ╔════ 用例编辑 tab — 原步骤编辑器 ═══════════════════════════════ ╗ -->
+  <div v-show="outerTab === 'caseEdit'" class="case-edit-region">
+    <!-- Editor Toolbar -->
+    <div class="editor-toolbar">
+      <el-select v-model="task.currentYamlFile.value" placeholder="选择用例文件" size="small"
+          style="flex:1;" @change="onFileChange" clearable>
+        <el-option v-for="f in task.yamlFiles.value" :key="f.filename" :label="f.name" :value="f.filename">
+          <span>{{ f.name }}</span>
+          <span style="float:right;color:#8492a6;font-size:11px">{{ f.step_count }} 步 | {{ f.platform }}</span>
+        </el-option>
+      </el-select>
+      <el-tooltip content="刷新文件列表" placement="top">
+        <el-button size="small" circle @click="task.refreshYamlFiles()">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="新建用例" placement="top">
+        <el-button size="small" @click="newFile">
+          <el-icon><CirclePlus /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="打开文件夹" placement="top">
+        <el-button size="small" @click="openFolder">
+          <el-icon><Document /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-dropdown @command="handleRunCommand" :disabled="!device.isConnected.value || !task.steps.value.length" trigger="click">
+        <el-button size="small" type="success">
+          <el-icon><CircleCheck /></el-icon>
+          全部运行
+          <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="run">运行</el-dropdown-item>
+            <el-dropdown-item command="run-allure">运行 + Allure 报告</el-dropdown-item>
+          </el-dropdown-menu>
         </template>
-      </template>
+      </el-dropdown>
+      <el-tooltip content="清理未引用图片" placement="top">
+        <el-button size="small" :disabled="!task.projectId.value" @click="task.cleanupTaskImages(msg)">
+          <el-icon><Delete /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="设置" placement="top">
+        <el-button size="small" @click="task.settingsVisible.value = true">
+          <el-icon><Setting /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-switch v-model="task.autoRun.value" active-text="自动运行" inactive-text="手动" size="small" style="margin-left:4px;"></el-switch>
+    </div>
 
-      <!-- Image locate step -->
-      <template v-else>
-        <div class="img-step-card">
-          <div class="img-step-preview"><img :src="s.image" alt="模板图片" /></div>
-          <div class="img-step-info">
-            <div class="img-step-meta">
-              <div class="img-step-title">
-                <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
-                <span class="step-num">{{ i + 1 }}.</span>
-                <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
+    <!-- Meta bar -->
+    <div class="editor-meta">
+      <span class="meta-item">平台: <b>{{ task.taskPlatform.value }}</b></span>
+      <span class="meta-item" v-if="task.taskName.value">名称: <b>{{ task.taskName.value }}</b></span>
+      <span class="meta-item">步骤: <b>{{ task.steps.value.length }}</b></span>
+    </div>
+
+    <!-- Step list -->
+    <div class="step-list" ref="stepList">
+      <div v-if="task.steps.value.length === 0" class="step-empty">
+        在下方输入命令, 或按 <b>/</b> 选择动作
+      </div>
+      <div v-for="(s, i) in task.steps.value" :key="i"
+          :class="['step-row',
+                   s._type === 'imglocate' ? 'step-img' : '',
+                   s._type === 'include' ? 'step-include' : '',
+                   { 'step-selected': task.selectedStepIndex.value === i }]"
+          @click="task.selectStep(i)" style="position:relative">
+        <div v-if="s.remark" class="step-remark">
+          <span class="step-remark-icon">#</span>{{ s.remark }}
+        </div>
+        <span class="step-drag-handle"><el-icon><Rank /></el-icon></span>
+
+        <template v-if="s._type === 'include'">
+          <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
+          <span class="step-num">{{ i + 1 }}.</span>
+          <span class="inc-step-badge">引用</span>
+          <span class="inc-step-name" :title="s.includeFile">{{ s.includeFile }}</span>
+          <span class="inc-step-count" v-if="s._includedSteps">({{ s._includedSteps.length }} 步)</span>
+          <div class="step-btns">
+            <button class="sb" @click.stop="toggleInclude(i)" :title="s._open ? '收起' : '展开'">{{ s._open ? '▾' : '▸' }}</button>
+            <button class="sb" @click.stop="openIncludedFile(s.includeFile)" title="打开该用例编辑">E</button>
+            <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
+          </div>
+          <div v-if="s._open" class="inc-step-body">
+            <div v-if="s._loading" class="inc-step-loading">加载中…</div>
+            <div v-else-if="!s._includedSteps || !s._includedSteps.length" class="inc-step-empty">（该用例没有步骤）</div>
+            <ol v-else class="inc-step-list">
+              <li v-for="(c, j) in s._includedSteps" :key="j" class="inc-step-item">
+                <span class="inc-sub-num">{{ j + 1 }}.</span>
+                <span v-if="c.remark" class="inc-sub-remark">#{{ c.remark }}</span>
+                <code class="inc-sub-code">{{ c.code }}</code>
+              </li>
+            </ol>
+          </div>
+        </template>
+
+        <template v-else-if="s._type !== 'imglocate'">
+          <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
+          <span class="step-num">{{ i + 1 }}.</span>
+          <code class="step-code">{{ s.code }}</code>
+          <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
+          <div class="step-btns">
+            <button class="sb" @click.stop="runFromHere(i)" title="从此步运行">&#9654;</button>
+            <button class="sb" @click.stop="runSingle(i)" title="仅此步">&#9654;&#9654;</button>
+            <button class="sb" @click.stop="copyStep(i)" title="复制代码">C</button>
+            <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
+          </div>
+          <template v-if="s._detail">
+            <div class="step-detail-toggle" @click.stop="s._detailOpen = !s._detailOpen">
+              详情 {{ s._detailOpen ? '▴' : '▾' }}
+            </div>
+            <pre v-if="s._detailOpen" class="step-detail-block">{{ s._detail }}</pre>
+          </template>
+        </template>
+
+        <template v-else>
+          <div class="img-step-card">
+            <div class="img-step-preview"><img :src="s.image" alt="模板图片" /></div>
+            <div class="img-step-info">
+              <div class="img-step-meta">
+                <div class="img-step-title">
+                  <span class="step-icon" :class="task.stepIcon(s._status).cls">{{ task.stepIcon(s._status).icon }}</span>
+                  <span class="step-num">{{ i + 1 }}.</span>
+                  <span class="img-step-badge">{{ s.action === 'click' ? '点击' : s.action === 'wait_show' ? '等待显示' : '等待消失' }}</span>
+                </div>
+                <div class="img-step-params">
+                  <span v-if="s.action === 'click'">网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
+                  <span v-if="s.action === 'click'">点击: 第{{ s.click_col+1 }}列, 第{{ s.click_row+1 }}行</span>
+                  <span>超时: {{ s.timeout }}s</span>
+                  <span v-if="s.threshold">阈值: {{ s.threshold }}</span>
+                </div>
               </div>
-              <div class="img-step-params">
-                <span v-if="s.action === 'click'">网格: {{ s.grid_h }}×{{ s.grid_v }}</span>
-                <span v-if="s.action === 'click'">点击: 第{{ s.click_col+1 }}列, 第{{ s.click_row+1 }}行</span>
-                <span>超时: {{ s.timeout }}s</span>
-                <span v-if="s.threshold">阈值: {{ s.threshold }}</span>
+              <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
+              <div class="img-step-btns">
+                <button class="sb" @click.stop="runFromHere(i)" title="从此步运行">&#9654;</button>
+                <button class="sb" @click.stop="runSingle(i)" title="仅此步">&#9654;&#9654;</button>
+                <button class="sb" @click.stop="copyStep(i)" title="复制代码">C</button>
+                <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
               </div>
             </div>
-            <span class="step-dur" v-if="s._duration">{{ s._duration }}s</span>
-            <div class="img-step-btns">
-              <button class="sb" @click.stop="runFromHere(i)" title="从此步运行">&#9654;</button>
-              <button class="sb" @click.stop="runSingle(i)" title="仅此步">&#9654;&#9654;</button>
-              <button class="sb" @click.stop="copyStep(i)" title="复制代码">C</button>
-              <button class="sb sb-del" @click.stop="deleteStep(i)" title="删除">X</button>
+          </div>
+          <template v-if="s._detail">
+            <div class="step-detail-toggle" @click.stop="s._detailOpen = !s._detailOpen">
+              详情 {{ s._detailOpen ? '▴' : '▾' }}
             </div>
-          </div>
-        </div>
-        <!-- Detail row stays at step-row level (flex-wrap takes care of full-width row) -->
-        <template v-if="s._detail">
-          <div class="step-detail-toggle" @click.stop="s._detailOpen = !s._detailOpen">
-            详情 {{ s._detailOpen ? '▴' : '▾' }}
-          </div>
-          <pre v-if="s._detailOpen" class="step-detail-block">{{ s._detail }}</pre>
+            <pre v-if="s._detailOpen" class="step-detail-block">{{ s._detail }}</pre>
+          </template>
         </template>
-      </template>
+      </div>
     </div>
-  </div>
 
-  <!-- CLI -->
-  <div class="cli-wrap" :class="{ 'cli-flash': cliFlash }">
-    <span class="cli-prefix" v-if="cliPrefix">{{ cliPrefix }}:</span>
-    <span class="cli-prompt"><el-icon><Promotion /></el-icon></span>
-    <input class="cli-input" ref="cliInput" v-model="cliText"
-        @keydown="onCliKeydown" @input="onCliInput"
-        :placeholder="cliPlaceholder"
-        spellcheck="false" autocomplete="off" />
-    <div class="slash-palette" v-if="slashVisible">
-      <div v-for="(item, idx) in slashItems" :key="idx"
-          class="slash-item" :class="{ 'slash-hl': idx === slashIdx }"
-          @mousedown.prevent="pickSlash(item)">
-        <span class="slash-key" v-if="!item.isApp">{{ item.key || item.action }}</span>
-        <span class="slash-key slash-app" v-else>{{ item.key }}</span>
-        <span class="slash-desc" v-if="!item.isApp">{{ item.desc }}</span>
+    <!-- CLI -->
+    <div class="cli-wrap" :class="{ 'cli-flash': cliFlash }">
+      <span class="cli-prefix" v-if="cliPrefix">{{ cliPrefix }}:</span>
+      <span class="cli-prompt"><el-icon><Promotion /></el-icon></span>
+      <input class="cli-input" ref="cliInput" v-model="cliText"
+          @keydown="onCliKeydown" @input="onCliInput"
+          :placeholder="cliPlaceholder"
+          spellcheck="false" autocomplete="off" />
+      <div class="slash-palette" v-if="slashVisible">
+        <div v-for="(item, idx) in slashItems" :key="idx"
+            class="slash-item" :class="{ 'slash-hl': idx === slashIdx }"
+            @mousedown.prevent="pickSlash(item)">
+          <span class="slash-key" v-if="!item.isApp">{{ item.key || item.action }}</span>
+          <span class="slash-key slash-app" v-else>{{ item.key }}</span>
+          <span class="slash-desc" v-if="!item.isApp">{{ item.desc }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOCAL_VARS 抽屉（用例特有常量） — 与日志同款抽屉布局，放在日志上方 -->
+    <div class="drawer-panel" :class="{ 'drawer-open': localVarsOpen }">
+      <div class="drawer-header" @click="localVarsOpen = !localVarsOpen">
+        <span>LOCAL_VARS <span class="drawer-count" v-if="Object.keys(task.localVars.value).length">({{ Object.keys(task.localVars.value).length }})</span></span>
+        <el-tooltip placement="top">
+          <template #content>本用例特有常量。写入用例文件顶层 <code>LOCAL_VARS = {...}</code>，代码里 <code>LOCAL_VARS["key"]</code>。<br>跨用例共享的常量请去 POM 的「全局 VARS」</template>
+          <el-icon class="kv-help" @click.stop><QuestionFilled /></el-icon>
+        </el-tooltip>
+        <span class="drawer-arrow">{{ localVarsOpen ? '▼' : '▲' }}</span>
+      </div>
+      <div class="drawer-body" v-show="localVarsOpen">
+        <div class="kv-row" v-for="(v, k) in task.localVars.value" :key="k">
+          <el-input :model-value="k" @change="nk => renameLocalVar(k, nk)" size="small" class="kv-key"></el-input>
+          <el-input :model-value="v" @update:modelValue="nv => setLocalVar(k, nv)" @blur="saveTaskDebounced" size="small" class="kv-val"></el-input>
+          <el-button text size="small" @click="deleteLocalVar(k)"><el-icon><Close /></el-icon></el-button>
+        </div>
+        <div class="kv-empty" v-if="Object.keys(task.localVars.value).length === 0">空 — 本用例独有的常量（账号 / 文案 / 时间戳种子等）</div>
+        <el-button text size="small" @click="addLocalVar" class="kv-add-btn"><el-icon><Plus /></el-icon> 添加</el-button>
+      </div>
+    </div>
+
+    <!-- Log panel -->
+    <div class="log-panel" :class="{ 'log-open': runner.logOpen.value }">
+      <div class="log-header" @click="toggleLog">
+        日志 {{ runner.logLines.value.length ? '(' + runner.logLines.value.length + ')' : '' }}
+        <span class="log-arrow">{{ runner.logOpen.value ? '▼' : '▲' }}</span>
+      </div>
+      <div class="log-body" v-show="runner.logOpen.value">
+        <div class="log-line" v-for="(l, i) in runner.logLines.value" :key="i"
+            :class="'log-' + l.level">{{ l.text }}</div>
       </div>
     </div>
   </div>
 
-  <!-- Log panel (inline, below CLI) -->
-  <div class="log-panel" :class="{ 'log-open': runner.logOpen.value }">
-    <div class="log-header" @click="toggleLog">
-      日志 {{ runner.logLines.value.length ? '(' + runner.logLines.value.length + ')' : '' }}
-      <span class="log-arrow">{{ runner.logOpen.value ? '▼' : '▲' }}</span>
+  <!-- ╔════ POM 采集 tab — 上/中/下三段 ═══════════════════════════════ ╗ -->
+  <div v-if="outerTab === 'pom'" class="pom-pane">
+    <!-- 上：当前 page 状态 + 工具栏（一行：page 选择 + 按钮组） -->
+    <div class="pom-pane-header">
+      <div class="pom-status-row">
+        <span class="pom-current-page" v-if="pom.currentFile.value">
+          采集中 · <b>{{ pom.page.value }}</b> · {{ Object.keys(pom.elements.value).length }} 个元素
+        </span>
+        <span class="pom-current-page" v-else style="color:var(--fg-2)">未选择 Page — 请先选择或新建</span>
+        <span class="pom-hint">双击控件 → selector / 框选区域 → 图像</span>
+      </div>
+
+      <div class="pom-toolbar-row">
+        <el-select :model-value="pom.currentFile.value" @update:modelValue="onSelectPage"
+            placeholder="选择 Page" size="small" filterable class="pom-page-select">
+          <el-option v-for="p in pom.pages.value" :key="p.filename"
+              :label="p.page + ' (' + p.element_count + ')'" :value="p.filename"></el-option>
+        </el-select>
+        <el-button size="small" @click="newPageDialogVisible = true">新建</el-button>
+        <el-popconfirm title="确定删除该 Page?" @confirm="onDeletePage">
+          <template #reference>
+            <el-button size="small" type="danger" :disabled="!pom.currentFile.value">删除</el-button>
+          </template>
+        </el-popconfirm>
+        <el-button v-if="!verify.verifyMode.value" size="small" type="primary"
+            :disabled="!pom.currentFile.value" @click="verify.beginVerify">验证</el-button>
+        <el-button v-else size="small" type="success" @click="verify.endVerify">完成验证</el-button>
+        <el-button size="small" @click="pom.installSkill(msg)">装 Skill</el-button>
+      </div>
+
+      <!-- 当前 page 元数据：desc / triggers，单行紧凑（用 prepend 替代独立 label）-->
+      <div class="pom-meta-row" v-if="pom.currentFile.value">
+        <el-input :model-value="pom.desc.value" @update:modelValue="v => pom.desc.value = v" @blur="pom.saveCurrentPage" size="small" placeholder="如：登录页">
+          <template #prepend>desc</template>
+        </el-input>
+        <el-input :model-value="pom.triggers.value" @update:modelValue="v => pom.triggers.value = v" @blur="pom.saveCurrentPage" size="small" placeholder="登录,login">
+          <template #prepend>triggers</template>
+        </el-input>
+      </div>
+
+      <div class="pom-tools-verify-status" v-if="verify.verifyMode.value">
+        <span class="verify-count">
+          已找到 {{ countByStatus('found') }} / {{ totalSelectorElements }} 个 selector 元素
+        </span>
+        <span class="verify-manual" v-if="countByStatus('manual') > 0">
+          · {{ countByStatus('manual') }} 个图像元素需手工验证
+        </span>
+        <span class="verify-pending" v-if="countByStatus('pending') > 0">
+          · 扫描中 {{ countByStatus('pending') }}
+        </span>
+        <span class="verify-notfound" v-if="countByStatus('not_found') > 0" style="color:var(--el-color-danger)">
+          · 未找到 {{ countByStatus('not_found') }}
+        </span>
+        <span v-if="countByStatus('unsupported') > 0" style="color:#b88cf9">
+          · 平台不支持 {{ countByStatus('unsupported') }}
+        </span>
+      </div>
     </div>
-    <div class="log-body" v-show="runner.logOpen.value">
-      <div class="log-line" v-for="(l, i) in runner.logLines.value" :key="i"
-          :class="'log-' + l.level">{{ l.text }}</div>
+
+    <!-- 中：元素列表（占满，唯一滚动区） -->
+    <div class="pom-pane-body">
+      <div class="pom-section" v-if="pom.currentFile.value">
+        <div class="prop-section-title">元素</div>
+        <template v-if="Object.keys(pom.elements.value).length === 0">
+          <div class="prop-empty" style="font-size:11px">双击截图控件 / 框选图像区域来采集</div>
+        </template>
+        <template v-else>
+          <div v-for="(sel, name) in pom.elements.value" :key="name"
+              :class="['pom-el-card', statusClass(name)]">
+            <div class="pom-el-row" v-if="editingElementName !== name">
+              <template v-if="sel && sel.image">
+                <img v-if="pom.imageCache.value[sel.image]"
+                    :src="pom.imageCache.value[sel.image]"
+                    class="pom-el-thumb" :title="sel.image" />
+                <span v-else class="pom-el-thumb pom-el-thumb-missing" :title="sel.image">[image]</span>
+                <span class="pom-el-name" :title="name">{{ name }}</span>
+                <span class="pom-el-sel" :title="sel.image">{{ sel.image }}</span>
+              </template>
+              <template v-else>
+                <span class="pom-el-name" :title="name">{{ name }}</span>
+                <span class="pom-el-sel" :title="JSON.stringify(sel)">{{ formatSelector(sel) }}</span>
+              </template>
+              <template v-if="verify.verifyMode.value">
+                <el-icon v-if="statusOf(name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
+                <span v-else-if="statusOf(name) === 'manual'" class="pom-el-status-tag tag-manual">需手工</span>
+                <span v-else-if="statusOf(name) === 'unsupported'" class="pom-el-status-tag tag-unsupported">平台不支持</span>
+                <span v-else-if="statusOf(name) === 'not_found'" class="pom-el-status-tag tag-notfound"
+                    :title="(verify.results.value[name] && verify.results.value[name].error) || ''">未找到</span>
+              </template>
+              <el-button size="small" @click="beginEditElement(name, sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
+              <el-button size="small" @click="pom.removeElement(name)" title="删除"><el-icon><Close /></el-icon></el-button>
+            </div>
+            <div class="pom-el-edit" v-else>
+              <div class="prop-row" style="margin-bottom:4px">
+                <label class="prop-label">名称</label>
+                <el-input v-model="editingName" size="small" autofocus></el-input>
+              </div>
+              <template v-if="editingSelector.image">
+                <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
+                  <label class="prop-label">图像</label>
+                  <div style="flex:1">
+                    <img v-if="pom.imageCache.value[editingSelector.image]"
+                        :src="pom.imageCache.value[editingSelector.image]"
+                        class="pom-el-preview" />
+                    <div style="font-size:11px;color:var(--fg-2);margin-top:4px;word-break:break-all">{{ editingSelector.image }}</div>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div class="prop-row" v-for="key in SELECTOR_KEYS" :key="key" style="margin-bottom:4px">
+                  <label class="prop-label">{{ SELECTOR_LABELS[key] }}</label>
+                  <el-input v-if="key !== 'index'" :model-value="editingSelector[key] || ''" @update:modelValue="v => editingSelector[key] = v" size="small" :placeholder="key === 'xpath' ? '可选，复杂选择器' : ''"></el-input>
+                  <el-input-number v-else :model-value="editingSelector.index === undefined ? null : editingSelector.index" @update:modelValue="v => editingSelector.index = (v === null || v === undefined) ? undefined : v" :min="0" size="small" controls-position="right"></el-input-number>
+                </div>
+              </template>
+              <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+                <el-button size="small" @click="cancelEditElement">取消</el-button>
+                <el-button size="small" type="primary" @click="commitEditElement(name)">保存</el-button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div class="prop-empty" v-else>在上方工具栏选择或新建 Page</div>
+    </div>
+
+    <!-- 下：全局 VARS 抽屉（log-panel 风格）-->
+    <div class="drawer-panel" :class="{ 'drawer-open': globalVarsOpen }">
+      <div class="drawer-header" @click="globalVarsOpen = !globalVarsOpen">
+        <span>全局 VARS <span class="drawer-count" v-if="Object.keys(pom.metaVars.value).length">({{ Object.keys(pom.metaVars.value).length }})</span></span>
+        <el-tooltip placement="top">
+          <template #content>跨用例共享常量（包名 / 基础 URL / 测试账号等）。写入 <code>pom/_meta.py</code>，代码里 <code>VARS["key"]</code>。<br>本用例特有的常量请在「用例编辑」tab 底部的 LOCAL_VARS 里加</template>
+          <el-icon class="kv-help" @click.stop><QuestionFilled /></el-icon>
+        </el-tooltip>
+        <span class="drawer-arrow">{{ globalVarsOpen ? '▼' : '▲' }}</span>
+      </div>
+      <div class="drawer-body" v-show="globalVarsOpen">
+        <div class="kv-row" v-for="(v, k) in pom.metaVars.value" :key="k">
+          <el-input :model-value="k" @change="nk => renameMetaVar(k, nk)" size="small" class="kv-key"></el-input>
+          <el-input :model-value="v" @update:modelValue="nv => setMetaVar(k, nv)" @blur="pom.saveMeta" size="small" class="kv-val"></el-input>
+          <el-button text size="small" @click="deleteMetaVar(k)"><el-icon><Close /></el-icon></el-button>
+        </div>
+        <div class="kv-empty" v-if="Object.keys(pom.metaVars.value).length === 0">空 — 点 + 添加（如 package / base_url / username）</div>
+        <el-button text size="small" @click="addMetaVar" class="kv-add-btn"><el-icon><Plus /></el-icon> 添加</el-button>
+      </div>
     </div>
   </div>
 
-  <!-- Settings dialog -->
+  <!-- ── 用例编辑设置对话框（保留原位置） ──────────────────────────── -->
   <el-dialog title="用例设置" v-model="task.settingsVisible.value" width="520px" top="10vh">
     <el-form label-width="80px" size="small">
       <el-form-item label="名称"><el-input v-model="task.taskName.value"></el-input></el-form-item>
@@ -229,6 +404,55 @@ const TEMPLATE = `
       <el-button type="primary" @click="applySettings" size="small">确定</el-button>
     </template>
   </el-dialog>
+
+  <!-- ── POM 新建 Page 对话框 ──────────────────────────────────────── -->
+  <el-dialog v-model="newPageDialogVisible" title="新建 Page" width="420px" :close-on-click-modal="false">
+    <div class="prop-row" style="margin-bottom:8px">
+      <label class="prop-label">Page 名</label>
+      <el-input v-model="newPageName" size="small" placeholder="如 LoginPage" @keyup.enter="onCreatePage" autofocus></el-input>
+    </div>
+    <div class="prop-row">
+      <label class="prop-label">描述</label>
+      <el-input v-model="newPageDesc" size="small" placeholder="如 登录页"></el-input>
+    </div>
+    <template #footer>
+      <el-button size="small" @click="newPageDialogVisible = false">取消</el-button>
+      <el-button size="small" type="primary" @click="onCreatePage">创建</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── POM 命名元素对话框（采集确认） ────────────────────────────── -->
+  <el-dialog v-model="pom.nameDialogVisible.value" title="命名元素" width="520px" :close-on-click-modal="false">
+    <div class="prop-row" style="margin-bottom:8px">
+      <label class="prop-label">元素名</label>
+      <el-input v-model="pom.pendingName.value" size="small" placeholder="如 登录按钮 / login_button" @keyup.enter="pom.confirmCapture(msg)" autofocus></el-input>
+    </div>
+    <template v-if="pom.pendingSelector.value && pom.pendingSelector.value.image">
+      <div style="font-size:11px;color:var(--fg-2);margin:8px 0 4px">图像预览（保存后用 dev.click(image=...) 模板匹配定位）</div>
+      <img v-if="pom.imageCache.value[pom.pendingSelector.value.image]"
+          :src="pom.imageCache.value[pom.pendingSelector.value.image]"
+          class="pom-el-preview" />
+      <div style="font-size:11px;color:var(--fg-2);margin-top:4px;word-break:break-all">{{ pom.pendingSelector.value.image }}</div>
+    </template>
+    <template v-else>
+      <div style="font-size:11px;color:var(--fg-2);margin:8px 0 4px">选择器（可编辑；留空字段保存时会自动剔除）</div>
+      <div class="prop-row" v-for="key in SELECTOR_KEYS" :key="key" style="margin-bottom:4px">
+        <label class="prop-label">{{ SELECTOR_LABELS[key] }}</label>
+        <el-input v-if="key !== 'index'"
+            :model-value="(pom.pendingSelector.value && pom.pendingSelector.value[key]) || ''"
+            @update:modelValue="v => pom.setPendingSelectorField(key, v)"
+            size="small"></el-input>
+        <el-input-number v-else
+            :model-value="pom.pendingSelector.value && pom.pendingSelector.value.index !== undefined ? pom.pendingSelector.value.index : null"
+            @update:modelValue="v => pom.setPendingSelectorField('index', (v === null || v === undefined) ? undefined : v)"
+            :min="0" size="small" controls-position="right"></el-input-number>
+      </div>
+    </template>
+    <template #footer>
+      <el-button size="small" @click="pom.nameDialogVisible.value = false">取消</el-button>
+      <el-button size="small" type="primary" @click="pom.confirmCapture(msg)">确认</el-button>
+    </template>
+  </el-dialog>
 </div>
 `;
 
@@ -242,7 +466,35 @@ export default {
     const runner = inject('runner');
     const undo   = inject('undo');
     const msg    = inject('msg');
+    const pom    = inject('pom');
+    const verify = inject('verify');
 
+    // 顶层 tab：'caseEdit'（默认）| 'pom'。
+    const outerTab = ref('caseEdit');
+
+    // 切到 POM tab：刷新数据 + 自动开启采集；离开/验证中按互斥规则控制采集开关
+    function onSwitchPom() {
+      outerTab.value = 'pom';
+      pom.loadPages();
+      pom.loadMeta();
+      pom.captureMode.value = true;   // 进入即采集，无需手动开关
+    }
+    watch(outerTab, (t) => {
+      if (t !== 'pom') {
+        verify.endVerify();
+        pom.captureMode.value = false;
+      } else {
+        // 兜底：任何路径下停留在 POM tab 都保持采集 ON（除非验证中互斥）
+        if (!verify.verifyMode.value) pom.captureMode.value = true;
+      }
+    });
+    // 验证开始时强制关采集；结束时恢复采集（保持 POM tab 语义）
+    watch(() => verify.verifyMode.value, (on) => {
+      if (outerTab.value !== 'pom') return;
+      pom.captureMode.value = !on;
+    });
+
+    // ── 原 StepPane state ────────────────────────────────────────────────
     const cliText        = ref('');
     const cliPrefix      = ref('');
     const cliPlaceholder = ref('tap: UI element');
@@ -254,8 +506,6 @@ export default {
     const cliInputRef    = ref(null);
 
     let sortableInstance = null;
-
-    // ── Sortable drag ─────────────────────────────────────────────────────
 
     function initSortable(el) {
       if (sortableInstance) sortableInstance.destroy();
@@ -282,21 +532,11 @@ export default {
       });
     }
 
-    // ── Step actions ──────────────────────────────────────────────────────
-
     async function screenshotAndDumpHierarchyProxy() {
-      // DevicePane's method; call via global proxy
       window._screenshotAndDump && await window._screenshotAndDump();
     }
-
-    function runFromHere(i) {
-      runner.runFromStep(i, screenshotAndDumpHierarchyProxy, msg);
-    }
-
-    function runSingle(i) {
-      runner.runSingleStep(i, screenshotAndDumpHierarchyProxy, msg);
-    }
-
+    function runFromHere(i) { runner.runFromStep(i, screenshotAndDumpHierarchyProxy, msg); }
+    function runSingle(i)   { runner.runSingleStep(i, screenshotAndDumpHierarchyProxy, msg); }
     function deleteStep(i) {
       undo.pushUndo(task.steps.value);
       task.steps.value.splice(i, 1);
@@ -305,7 +545,6 @@ export default {
       }
       task.saveCurrentTask(device.serial.value).catch(() => {});
     }
-
     function copyStep(i) {
       const code = task.steps.value[i].code || '';
       navigator.clipboard.writeText(code).catch(() => {
@@ -316,13 +555,10 @@ export default {
       msg.success('已复制');
     }
 
-    // ── Include step (reference another task file) ────────────────────────
-
     async function toggleInclude(i) {
       const s = task.steps.value[i];
       if (!s || s._type !== 'include') return;
       const opening = !s._open;
-      // mutate inline; assign back to keep reactivity for nested fields
       task.steps.value[i] = { ...s, _open: opening };
       if (opening && !s._includedSteps && !s._loading) {
         task.steps.value[i] = { ...task.steps.value[i], _loading: true };
@@ -335,18 +571,13 @@ export default {
         }
       }
     }
-
     async function openIncludedFile(filename) {
       if (!filename) return;
       await task.loadYamlFile(filename, msg);
     }
-
-    // ── File operations ───────────────────────────────────────────────────
-
     async function onFileChange(filename) {
       await task.loadYamlFile(filename, msg);
     }
-
     function newFile() {
       task.clearTask();
       task.taskName.value = '新建用例';
@@ -354,11 +585,9 @@ export default {
       task.projectId.value = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
       task.settingsVisible.value = true;
     }
-
     async function openFolder() {
       await fetch('/tasks/open-folder', { method: 'POST' }).catch(() => {});
     }
-
     function applySettings() {
       task.settingsVisible.value = false;
       if (!task.currentYamlFile.value) {
@@ -368,13 +597,10 @@ export default {
       task.saveCurrentTask(device.serial.value).catch(() => {});
       task.refreshYamlFiles();
     }
-
     function handleRunCommand(cmd) {
       if (cmd === 'run') runner.runAllSteps(screenshotAndDumpHierarchyProxy, msg, device.serial.value);
       else if (cmd === 'run-allure') runner.runAllStepsAllure(msg);
     }
-
-    // ── CLI ───────────────────────────────────────────────────────────────
 
     function onCliKeydown(e) {
       if (e.key === 'Enter') {
@@ -392,7 +618,6 @@ export default {
         if (device.elementSelectMode.value) { device.elementSelectMode.value = false; msg.info('已取消元素选择'); }
       }
     }
-
     function onCliInput() {
       if (cliText.value.startsWith('/')) {
         slashVisible.value = true;
@@ -422,7 +647,6 @@ export default {
         slashVisible.value = false;
       }
     }
-
     function addIncludeStep(filename) {
       undo.pushUndo(task.steps.value);
       const step = task.buildIncludeStep(filename);
@@ -431,18 +655,15 @@ export default {
       task.saveCurrentTask(device.serial.value).catch(() => {});
       task.selectedStepIndex.value = idx;
     }
-
     function submitCli() {
       let line = cliText.value.trim();
       if (!line && !cliPrefix.value) return;
-      // include prefix: free-text submit not allowed — user must pick from list
       if (cliPrefix.value === 'include') return;
       if (cliPrefix.value) line = `${cliPrefix.value}: ${line}`;
       if (!/^(\w+):\s*(.*)/.test(line)) line = `tap: ${line}`;
       const m = line.match(/^(\w+):\s*(.*)/);
       if (!m) return;
       const action = m[1], value = m[2] || '';
-
       if (action === 'imglocate') { device.enterCaptureMode(msg); cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false; return; }
       if (action === 'swipe')     { device.enterSwipeRecordMode(msg); cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false; return; }
       if (action === 'element')   {
@@ -450,7 +671,6 @@ export default {
         msg.info('请在截图中点击选择一个 UI 元素');
         cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false; return;
       }
-
       undo.pushUndo(task.steps.value);
       const code = task.stepToCode(action, value);
       const idx = task.steps.value.length;
@@ -460,7 +680,6 @@ export default {
       cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false;
       if (task.autoRun.value) runSingle(idx);
     }
-
     function pickSlash(item) {
       if (!item) return;
       if (item.isFile) {
@@ -475,7 +694,6 @@ export default {
       cliPrefix.value = item.action;
       cliText.value = '';
       cliPlaceholder.value = item.desc;
-      // include and key open a second-stage picker immediately
       if (item.action === 'key' || item.action === 'include') {
         nextTick(() => onCliInput());
       } else {
@@ -483,7 +701,6 @@ export default {
       }
       nextTick(() => cliInputRef.value && cliInputRef.value.focus());
     }
-
     function focusCli() {
       if (cliInputRef.value) {
         cliInputRef.value.focus();
@@ -491,14 +708,152 @@ export default {
         setTimeout(() => { cliFlash.value = false; }, 1500);
       }
     }
-
-    // expose focusCli globally so App.js keydown can call it
     window._focusCli = focusCli;
-
     function toggleLog() { runner.logOpen.value = !runner.logOpen.value; }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // ── POM tab 内部状态 ────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    const SELECTOR_KEYS = ['text', 'resourceId', 'className', 'xpath', 'description', 'index'];
+    const SELECTOR_LABELS = {
+      text: '文本', resourceId: '资源ID', className: '类型',
+      xpath: 'XPath', description: '描述', index: '索引',
+    };
+
+    const editingElementName = ref('');
+    const editingName        = ref('');
+    const editingSelector    = ref({});
+
+    function formatSelector(sel) {
+      if (!sel) return '';
+      const parts = [];
+      for (const k of SELECTOR_KEYS) {
+        if (sel[k] === undefined || sel[k] === null || sel[k] === '') continue;
+        parts.push(k + '=' + (typeof sel[k] === 'string' ? sel[k] : JSON.stringify(sel[k])));
+      }
+      return parts.join(' · ');
+    }
+    function beginEditElement(name, sel) {
+      editingElementName.value = name;
+      editingName.value = name;
+      editingSelector.value = { ...(sel || {}) };
+    }
+    function cancelEditElement() {
+      editingElementName.value = '';
+      editingName.value = '';
+      editingSelector.value = {};
+    }
+    function commitEditElement(oldName) {
+      const ok = pom.updateElement(oldName, editingName.value, editingSelector.value, msg);
+      if (ok) cancelEditElement();
+    }
+
+    function onSelectPage(v) {
+      verify.endVerify();
+      pom.selectPage(v, msg);
+    }
+
+    const newPageDialogVisible = ref(false);
+    const newPageName = ref('');
+    const newPageDesc = ref('');
+    async function onCreatePage() {
+      const name = (newPageName.value || '').trim();
+      if (!name) { msg.error('请输入 Page 名'); return; }
+      const ok = await pom.createPage(name, (newPageDesc.value || '').trim(), msg);
+      if (ok) {
+        newPageDialogVisible.value = false;
+        newPageName.value = '';
+        newPageDesc.value = '';
+      }
+    }
+    async function onDeletePage() {
+      verify.endVerify();
+      await pom.deletePage(pom.currentFile.value, msg);
+    }
+
+    const totalSelectorElements = computed(() =>
+      Object.values(pom.elements.value).filter(s => !(s && typeof s === 'object' && 'image' in s)).length);
+    function statusOf(name) {
+      const r = verify.results.value[name];
+      return r ? r.status : '';
+    }
+    const STATUS_CLASS = {
+      found: 'pom-el-status-found', not_found: 'pom-el-status-notfound',
+      pending: 'pom-el-status-pending', manual: 'pom-el-status-manual',
+      unsupported: 'pom-el-status-unsupported',
+    };
+    function statusClass(name) {
+      if (!verify.verifyMode.value) return '';
+      return STATUS_CLASS[statusOf(name)] || '';
+    }
+    function countByStatus(s) {
+      return Object.values(verify.results.value).filter(r => r.status === s).length;
+    }
+
+    // ── 底部抽屉（log-panel 风格） ───────────────────────────────────────
+    const localVarsOpen  = ref(false);   // 用例编辑 tab 的 LOCAL_VARS 抽屉
+    const globalVarsOpen = ref(false);   // POM tab 的全局 VARS 抽屉
+
+    // 用例 LOCAL_VARS 编辑：改完 debounce 写回用例文件
+    let _saveTaskTimer = null;
+    function saveTaskDebounced() {
+      clearTimeout(_saveTaskTimer);
+      _saveTaskTimer = setTimeout(() => {
+        task.saveCurrentTask(device.serial.value).catch(() => {});
+      }, 400);
+    }
+    function setLocalVar(k, v) {
+      task.localVars.value = { ...task.localVars.value, [k]: v };
+    }
+    function renameLocalVar(oldK, newK) {
+      if (!newK || newK === oldK) return;
+      if (Object.prototype.hasOwnProperty.call(task.localVars.value, newK)) { msg.error('变量名已存在'); return; }
+      const next = {};
+      for (const [k, v] of Object.entries(task.localVars.value)) next[k === oldK ? newK : k] = v;
+      task.localVars.value = next;
+      saveTaskDebounced();
+    }
+    function deleteLocalVar(k) {
+      const next = { ...task.localVars.value };
+      delete next[k];
+      task.localVars.value = next;
+      saveTaskDebounced();
+    }
+    function addLocalVar() {
+      let i = 1, k = 'var1';
+      while (Object.prototype.hasOwnProperty.call(task.localVars.value, k)) { i++; k = 'var' + i; }
+      task.localVars.value = { ...task.localVars.value, [k]: '' };
+      saveTaskDebounced();
+    }
+
+    function setMetaVar(k, v) {
+      pom.metaVars.value = { ...pom.metaVars.value, [k]: v };
+    }
+    function renameMetaVar(oldK, newK) {
+      if (!newK || newK === oldK) return;
+      if (Object.prototype.hasOwnProperty.call(pom.metaVars.value, newK)) { msg.error('变量名已存在'); return; }
+      const next = {};
+      for (const [k, v] of Object.entries(pom.metaVars.value)) next[k === oldK ? newK : k] = v;
+      pom.metaVars.value = next;
+      pom.saveMeta();
+    }
+    function deleteMetaVar(k) {
+      const next = { ...pom.metaVars.value };
+      delete next[k];
+      pom.metaVars.value = next;
+      pom.saveMeta();
+    }
+    function addMetaVar() {
+      let i = 1, k = 'var1';
+      while (Object.prototype.hasOwnProperty.call(pom.metaVars.value, k)) { i++; k = 'var' + i; }
+      pom.metaVars.value = { ...pom.metaVars.value, [k]: '' };
+      pom.saveMeta();
+    }
+
     return {
-      task, device, runner, msg,
+      task, device, runner, msg, pom, verify,
+      outerTab, onSwitchPom,
+      // case edit
       cliText, cliPrefix, cliPlaceholder, slashVisible, slashIdx, slashItems, cliFlash,
       stepList: stepListRef, cliInput: cliInputRef,
       initSortable,
@@ -506,6 +861,17 @@ export default {
       runFromHere, runSingle, deleteStep, copyStep,
       toggleInclude, openIncludedFile,
       onCliKeydown, onCliInput, submitCli, pickSlash, focusCli, toggleLog,
+      // pom
+      SELECTOR_KEYS, SELECTOR_LABELS,
+      editingElementName, editingName, editingSelector,
+      formatSelector, beginEditElement, cancelEditElement, commitEditElement,
+      onSelectPage, onDeletePage,
+      newPageDialogVisible, newPageName, newPageDesc, onCreatePage,
+      totalSelectorElements, statusOf, statusClass, countByStatus,
+      // local vars (case-level)
+      localVarsOpen, globalVarsOpen,
+      setLocalVar, renameLocalVar, deleteLocalVar, addLocalVar, saveTaskDebounced,
+      setMetaVar, renameMetaVar, deleteMetaVar, addMetaVar,
     };
   },
 

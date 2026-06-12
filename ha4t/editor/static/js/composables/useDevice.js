@@ -1,5 +1,6 @@
 import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 import { listDevices as apiListDevices, connectDevice as apiConnectDevice, fetchScreenshot as apiFetchScreenshot, fetchHierarchy as apiFetchHierarchy } from '../api.js';
+import { buildXPath } from '../utils/xpathLite.js';
 
 const { ref, reactive } = Vue;
 
@@ -88,6 +89,21 @@ export function useDevice() {
     swipeRecordMode.value = false;
     swipePoints.value = [];
   }
+  // 选中节点：同步算出 xpath 写到 node 上（mutate hierarchy 同引用），再赋值 selectedNode。
+  // 这样 selectorFromNode / 详情面板都能立刻看到 xpath。
+  // 算法 O(K) 查询 + O(N) 索引（< 1ms / 几千节点），同步无 HTTP。
+  function selectNode(node) {
+    if (!node) {
+      selectedNode.value = null;
+      return null;
+    }
+    if (!node.xpath && jsonHierarchy.value) {
+      node.xpath = buildXPath(platform.value, jsonHierarchy.value, node._id);
+    }
+    selectedNode.value = node;
+    return node;
+  }
+
 
   return {
     platform, serial, devices, isConnected, isConnecting, isDumping,
@@ -95,7 +111,6 @@ export function useDevice() {
     jsonHierarchy, treeData, hoveredNode, selectedNode,
     captureMode, captureStart, captureRect,
     swipeRecordMode, swipePoints, elementSelectMode,
-    initPlatform, listDevice, connectDevice,
-    enterCaptureMode, exitCaptureMode, enterSwipeRecordMode, exitSwipeRecordMode,
+    initPlatform, listDevice, connectDevice, selectNode,
   };
 }

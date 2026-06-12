@@ -3,6 +3,8 @@ import { useUndo }   from './composables/useUndo.js';
 import { useDevice } from './composables/useDevice.js';
 import { useTask }   from './composables/useTask.js';
 import { useRunner } from './composables/useRunner.js';
+import { usePom }    from './composables/usePom.js';
+import { usePomVerify } from './composables/usePomVerify.js';
 import DevicePane    from './components/DevicePane.js';
 import StepPane      from './components/StepPane.js';
 import InspectorPane from './components/InspectorPane.js';
@@ -52,6 +54,7 @@ const TEMPLATE = `
     <el-link href="https://github.com/exuils/HA4T" target="_blank" :underline="false" style="color:#8492a6">GitHub</el-link>
   </div>
 
+
   <!-- Left divider drag -->
   <div class="divider-v divider-left"
       @mousedown="startDragLeft"
@@ -70,6 +73,7 @@ const TEMPLATE = `
   <InspectorPane />
 
 
+
 </div>
 `;
 
@@ -84,12 +88,17 @@ export default defineComponent({
     const device = useDevice();
     const task   = useTask();
     const runner = useRunner(task, device);
+    const pom    = usePom();
+    const verify = usePomVerify({ pom, device, msg });
+
 
     provide('msg',    msg);
     provide('undo',   undo);
     provide('device', device);
     provide('task',   task);
     provide('runner', runner);
+    provide('pom',    pom);
+    provide('verify', verify);
 
     const version = ref('');
 
@@ -98,6 +107,17 @@ export default defineComponent({
     watch(() => device.platform.value, (v) => saveToLocalStorage('platform', v));
     watch(() => device.wdaUrl.value,   (v) => saveToLocalStorage('wdaUrl', v));
     watch(() => device.snapshotMaxDepth.value, (v) => saveToLocalStorage('snapshotMaxDepth', v));
+
+
+    // 验证结果 → 截图 overlay 同步（useCanvas.renderHierarchy 读 window._pomVerifyResults）
+    watch(() => verify.results.value, (v) => {
+      window._pomVerifyResults = verify.verifyMode.value ? v : null;
+      if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+    }, { deep: true });
+    watch(() => verify.verifyMode.value, (on) => {
+      window._pomVerifyResults = on ? verify.results.value : null;
+      if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+    });
     watch(() => task.autoRun.value,    (v) => saveToLocalStorage('autoRun', v));
 
     // ── device actions ────────────────────────────────────────────────────
@@ -160,6 +180,9 @@ export default defineComponent({
     // ── lifecycle ──────────────────────────────────────────────────────────
 
     onMounted(async () => {
+      // hierarchy 重新 dump 后自动重扫（useCanvas 调 window._pomVerifyOnHierarchy）
+      window._pomVerifyOnHierarchy = verify.onHierarchyUpdated;
+
       // fetch version
       try {
         const res = await getVersion();

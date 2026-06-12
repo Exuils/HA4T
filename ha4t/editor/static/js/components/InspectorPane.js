@@ -1,5 +1,10 @@
 const { inject, ref, computed, nextTick, watch } = Vue;
 
+// InspectorPane — 中间面板（grid-area: right），3 个 mutually-exclusive 子 tab：
+//   • props      —— 步骤属性（默认）
+//   • hierarchy  —— 层级树
+//   • detail     —— 元素详情
+// POM 采集已移至右栏 StepPane 的「POM 采集」外层 tab，不在此文件内承载。
 const TEMPLATE = `
 <div class="right">
   <div class="inspector-tabs">
@@ -35,6 +40,11 @@ const TEMPLATE = `
     <template v-else-if="activeTab === 'detail' && device.selectedNode.value">
       <div class="center-header">
         <p class="region-title">元素详情</p>
+        <el-button size="small" @click="addLocatorToPom"
+            :disabled="!pom.currentFile.value"
+            :title="pom.currentFile.value ? '把该元素加入当前 Page' : '请先在 POM 采集 tab 选择或新建 Page'">
+          <el-icon><Collection /></el-icon>添加到 POM
+        </el-button>
         <el-button size="small" type="primary" @click="insertStepFromElement">
           <el-icon><Plus /></el-icon>插入步骤
         </el-button>
@@ -258,6 +268,7 @@ export default {
     const task   = inject('task');
     const device = inject('device');
     const msg    = inject('msg');
+    const pom    = inject('pom');
 
     const activeTab       = ref('props');
     const nodeFilterText  = ref('');
@@ -286,21 +297,24 @@ export default {
       return selectedStep.value ? task.selectedStepConfig(selectedStep.value) : null;
     });
 
+    // 节点详情：过滤空值（空字符串 / null / undefined / false 中 falsy 的字符串属性都不展示）。
+    // Flutter / 非原生渲染框架常导致 text/resourceId/xpath 空字符串 — 显示出来反而像"字段丢了"。
+    // 数字 0、布尔 false 仍要显示（语义有意义，如 index=0、clickable=false）。
     const selectedNodeDetails = computed(() => {
       const node = device.selectedNode.value;
       if (!node) return [];
       const HIDDEN = new Set(['children', '_id', '_parentId', 'bounds']);
+      const isEmpty = (v) => v === null || v === undefined || v === '';
       return Object.entries(node)
-        .filter(([k]) => !HIDDEN.has(k))
+        .filter(([k, v]) => !HIDDEN.has(k) && !isEmpty(v))
         .map(([key, value]) => {
-          // pretty-print rect objects
-          let display = value;
+          let display;
           if (key === 'rect' && value && typeof value === 'object') {
             display = `x=${value.x}, y=${value.y}, w=${value.width}, h=${value.height}`;
           } else if (value && typeof value === 'object') {
             try { display = JSON.stringify(value); } catch { display = String(value); }
           } else {
-            display = String(value ?? '');
+            display = String(value);
           }
           return { key, value: display };
         });
@@ -312,11 +326,10 @@ export default {
     }
 
     function handleTreeNodeClick(data) {
-      device.selectedNode.value = data;
+      device.selectNode(data);
       activeTab.value = 'detail';
     }
 
-    // tree hover — sync to canvas hoveredNode so device pane highlights it
     function handleTreeMouseEnter(data) {
       device.hoveredNode.value = data;
       if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
@@ -342,13 +355,23 @@ export default {
       msg.success(`已插入: ${step.code}`);
     }
 
+    function addLocatorToPom() {
+      const node = device.selectedNode.value;
+      if (!node) return;
+      if (!pom.currentFile.value) {
+        msg.warn('请先在 POM 采集 tab 选择或新建 Page');
+        return;
+      }
+      // 复用 POM 采集流程：弹命名对话框、填 selector、确认后写入当前 page
+      pom.beginCapture(node);
+    }
+
     function copyVal(value) {
       navigator.clipboard.writeText(String(value)).catch(() => {});
       msg.success('已复制');
     }
 
     // ── Image grid canvas ─────────────────────────────────────────────────
-
     function renderImgConfigGrid() {
       const canvas = document.querySelector('#imgConfigCanvas');
       const img    = document.querySelector('#imgConfigPreview');
@@ -399,11 +422,11 @@ export default {
     }
 
     return {
-      task, device, msg, activeTab, nodeFilterText, treeRef,
+      task, device, msg, pom, activeTab, nodeFilterText, treeRef,
       selectedStep, stepConfig, selectedNodeDetails,
       upd, handleTreeNodeClick, handleTreeMouseEnter, handleTreeMouseLeave,
       filterNode,
-      insertStepFromElement, copyVal, renderImgConfigGrid, onGridCellClick,
+      insertStepFromElement, addLocatorToPom, copyVal, renderImgConfigGrid, onGridCellClick,
     };
   },
 };

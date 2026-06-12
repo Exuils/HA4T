@@ -9,6 +9,7 @@ Subpackages
 
    ha4t.aircv
    ha4t.cdp
+   ha4t.drivers
    ha4t.utils
 
 Submodules
@@ -18,6 +19,7 @@ Submodules
    :maxdepth: 4
 
    ha4t.config
+   ha4t.exceptions
    ha4t.orc
 
 Module contents

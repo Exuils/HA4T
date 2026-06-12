@@ -10,7 +10,7 @@ import { fetchScreenshot, fetchHierarchy, saveImage } from '../api.js';
 // Cross-component bridges (kept for backward compat):
 //   window._screenshotAndDump     ← called by App.js, StepPane.js
 //   window._renderHierarchyCanvas ← called by InspectorPane tree hover
-export function useCanvas({ device, task, runner, msg }) {
+export function useCanvas({ device, task, runner, msg, pom }) {
   // last loaded screenshot — kept for redraw on resize
   let _lastScreenshotData = null;
   let _moveScheduled = false;
@@ -115,6 +115,25 @@ export function useCanvas({ device, task, runner, msg }) {
         ctx.fillStyle='rgba(64,158,255,0.15)'; ctx.fillRect(x, y, r.w*scale, r.h*scale);
       }
     }
+    // ── verify mode overlay（POM 元素定位结果，App.js watch 同步到全局） ──
+    if (window._pomVerifyResults) {
+      const results = window._pomVerifyResults;
+      ctx.setLineDash([]);
+      for (const name of Object.keys(results)) {
+        const r = results[name];
+        if (r.status !== 'found' || !r.rect) continue;
+        const x = r.rect.x * scale + offsetX;
+        const y = r.rect.y * scale + offsetY;
+        const w = r.rect.width * scale;
+        const h = r.rect.height * scale;
+        ctx.strokeStyle = '#67c23a'; ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(103,194,58,0.15)';
+        ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+        // 元素名标签
+        ctx.fillStyle = '#67c23a'; ctx.font = '11px Consolas, monospace';
+        ctx.fillText(name, x + 2, y + 12);
+      }
+    }
   }
 
   // Flat-scan: visit every node and pick the smallest-area rect that contains
@@ -157,6 +176,8 @@ export function useCanvas({ device, task, runner, msg }) {
         const hier = hierRes.data;
         const rootNode = hier.jsonHierarchy || hier;
         device.jsonHierarchy.value = rootNode;
+        // POM 验证模式下，层级刷新 → 自动重扫（App.js onMounted 挂的钩子）
+        if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
         if (hier.windowSize) {
           device.displaySize.value = hier.windowSize;
           device.scale.value = hier.scale || 1;
@@ -203,7 +224,7 @@ export function useCanvas({ device, task, runner, msg }) {
     const { scale, offsetX, offsetY } = device.screenshotTransform;
     const node = findSmallestNode(device.jsonHierarchy.value, mx, my, scale, offsetX, offsetY);
     if (node) {
-      device.selectedNode.value = node;
+      device.selectNode(node);
       if (device.elementSelectMode.value) {
         device.elementSelectMode.value = false;
         const step = task.elementFromNode(node);
@@ -215,14 +236,20 @@ export function useCanvas({ device, task, runner, msg }) {
     }
   }
 
-  // Double-click → record as a step immediately (always, no mode switch)
+  // Double-click → record as a step immediately, unless POM capture mode is on.
   function onMouseDblClick(e) {
     if (device.captureMode.value || device.swipeRecordMode.value) return;
     const { x: mx, y: my } = pointToCanvas(e);
     const { scale, offsetX, offsetY } = device.screenshotTransform;
     const node = findSmallestNode(device.jsonHierarchy.value, mx, my, scale, offsetX, offsetY);
     if (!node) return;
-    device.selectedNode.value = node;
+    if (pom && pom.captureMode.value) {
+      device.selectNode(node);
+      renderHierarchy();
+      pom.beginCapture(node);
+      return;
+    }
+    device.selectNode(node);
     const step = task.elementFromNode(node);
     task.steps.value.push(step);
     task.saveCurrentTask(device.serial.value).catch(() => {});
@@ -285,6 +312,20 @@ export function useCanvas({ device, task, runner, msg }) {
     const dpr = window.devicePixelRatio || 1;
     tctx.drawImage(ssCanvas, sx * dpr * scale, sy * dpr * scale, sw * dpr * scale, sh * dpr * scale, 0, 0, sw, sh);
     const dataUrl = tmp.toDataURL('image/png');
+
+    // ── POM image-element route ─────────────────────────────────────
+    // Active when the user enabled "POM 采集模式" *and* hit the capture button.
+    // The cropped image goes to <images_dir>/ under a POM-namespaced filename
+    // (so the same file is not co-owned with step images), then the naming
+    // dialog opens with selector = { image: filename }.
+    if (pom && pom.captureMode.value) {
+      const fname = `pom_${pom.page.value || 'page'}_${Date.now()}.png`;
+      await saveImage(fname, dataUrl);
+      pom.beginImageCapture(fname, dataUrl);
+      return;
+    }
+
+    // ── Default route: imglocate step ───────────────────────────────
     const pid = task.projectId.value || ('proj_' + Date.now().toString(36));
     const fname = `${pid}_${Date.now()}.png`;
     const step = {

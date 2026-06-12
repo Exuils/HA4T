@@ -158,3 +158,59 @@ export async function reorderTask(filename, newOrder) {
   });
   return checkResponse(response);
 }
+
+export async function pomListPages() {
+  const response = await fetch(`${API_HOST}pom/pages`);
+  return checkResponse(response);
+}
+
+export async function pomGetPage(filename) {
+  const response = await fetch(`${API_HOST}pom/pages/${encodeURIComponent(filename)}`);
+  return checkResponse(response);
+}
+
+export async function pomSavePage(payload) {
+  const response = await fetch(`${API_HOST}pom/pages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return checkResponse(response);
+}
+
+export async function pomDeletePage(filename) {
+  const response = await fetch(`${API_HOST}pom/pages/${encodeURIComponent(filename)}`, {
+    method: 'DELETE'
+  });
+  return checkResponse(response);
+}
+
+export async function pomGetMeta() {
+  const response = await fetch(`${API_HOST}pom/meta`);
+  return checkResponse(response);
+}
+
+export async function pomSaveMeta(payload) {
+  const response = await fetch(`${API_HOST}pom/meta`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return checkResponse(response);
+}
+
+export async function pomInstallSkill() {
+  const response = await fetch(`${API_HOST}pom/install-skill`, {
+    method: 'POST'
+  });
+  return checkResponse(response);
+}
+
+export async function pomVerifySelector(payload) {
+  const response = await fetch(`${API_HOST}pom/verify-selector`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return checkResponse(response);
+}

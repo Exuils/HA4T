@@ -35,14 +35,16 @@ export function useRunner(task, device) {
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'step') {
-          const idx = (msg.index || 1) - 1;
+          // 后端 step.index 是子 yaml 内序号（1-based）；stepOffset 是子 yaml
+          // 在完整 steps 数组中的起始位置（runFromStep / runSingleStep 都从中间起跑）。
+          const idx = (msg.index || 1) - 1 + (stepOffset || 0);
           if (task.steps.value[idx]) {
             const s = { ...task.steps.value[idx], _status: msg.status, _detail: msg.detail || '', _duration: msg.duration };
             if (msg.status === 'fail') s._detailOpen = true;
             task.steps.value[idx] = s;
             if (msg.status === 'fail') logOpen.value = true;
             const color = { ok:'ok', fail:'fail', running:'info', skipped:'warn' }[msg.status] || 'info';
-            addLog(color, `Step ${msg.index} → ${msg.status}`);
+            addLog(color, `Step ${idx + 1} → ${msg.status}`);
           }
           if (msg.status === 'ok' || msg.status === 'fail') {
             scheduleDump(screenshotAndDumpHierarchy);
@@ -70,7 +72,7 @@ export function useRunner(task, device) {
     task.steps.value[i] = { ...s, _status: 'running' };
     isRunning.value = true;
     try {
-      await wsRun(task.taskToYamlSingle(i, device.serial.value), 0, screenshotAndDumpHierarchy);
+      await wsRun(task.taskToYamlSingle(i, device.serial.value), i, screenshotAndDumpHierarchy);
     } catch (e) {
       task.steps.value[i] = { ...task.steps.value[i], _status: 'fail', _detail: e.message, _detailOpen: true };
       addLog('fail', `步骤 ${i + 1} 错误: ${e.message}`);

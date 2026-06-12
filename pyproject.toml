@@ -82,4 +82,4 @@ exclude = ["tests"]
 
 [tool.setuptools.package-data]
 ha4t = ["binaries/*"]
-"ha4t.editor" = ["static/**/*"]
+"ha4t.editor" = ["static/**/*", "skills/**/*"]

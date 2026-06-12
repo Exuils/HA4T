@@ -33,6 +33,19 @@ function esc(s) {
   return (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
+// Build a locator dict from a parsed hierarchy node — module-level so POM
+// capture can reuse the exact same selector shape as element step recording.
+export function selectorFromNode(node) {
+  const selector = {};
+  if (node.text) selector.text = node.text;
+  if (node.resourceId) selector.resourceId = node.resourceId;
+  if (node._type) selector.className = node._type;
+  if (node.xpath) selector.xpath = node.xpath;
+  if (node.description) selector.description = node.description;
+  if (node.index !== undefined && node.index !== null && node.index >= 0) selector.index = node.index;
+  return selector;
+}
+
 function buildSelectorString(selector) {
   if (!selector) return '';
   const e = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
@@ -163,6 +176,8 @@ export function useTask() {
   const taskRerun    = ref(0);
   const steps        = ref([]);
   const _extraLines  = ref([]);
+  // 用例特有常量（顶层 LOCAL_VARS = {...} 字典，自动检测并从 _extraLines 中剥离）
+  const localVars    = ref({});
 
   const selectedStepIndex = ref(-1);
   const settingsVisible   = ref(false);
@@ -183,6 +198,7 @@ export function useTask() {
     taskTag.value = ''; taskFeature.value = '';
     taskStory.value = ''; taskSeverity.value = 'normal'; taskRerun.value = 0;
     steps.value = []; selectedStepIndex.value = -1; _extraLines.value = [];
+    localVars.value = {};
   }
 
   function parseYamlToTask(content) {
@@ -192,8 +208,15 @@ export function useTask() {
     let tag = '', feature = '', story = '', severity = 'normal', rerun = 0;
     const parsedSteps = [];
     const extraLines = [];
+    // 先从原始 content 中识别 LOCAL_VARS = { ... } 块（必须是单引号/双引号字符串字面量；
+    // 找到后从 lines 移除，避免落进 _extraLines 重复输出）
+    const lv = _extractLocalVarsBlock(lines);
+    let workLines = lines;
+    if (lv) {
+      workLines = lines.slice(0, lv.startIdx).concat(lines.slice(lv.endIdx + 1));
+    }
     let inExtra = true;
-    for (const line of lines) {
+    for (const line of workLines) {
       if (line.startsWith('# name:'))        { name     = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# desc:'))        { desc     = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# platform:'))    { platform = line.split(':')[1].trim(); continue; }
@@ -236,6 +259,7 @@ export function useTask() {
     taskTag.value = tag; taskFeature.value = feature; taskStory.value = story;
     taskSeverity.value = severity; taskRerun.value = rerun;
     steps.value = parsedSteps; _extraLines.value = extraLines;
+    localVars.value = lv ? lv.vars : {};
   }
 
   function taskToYaml(serial) {
@@ -251,6 +275,8 @@ export function useTask() {
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
     y += 'from ha4t import connect, include\nfrom time import sleep\n';
     y += `dev = connect(platform="${taskPlatform.value}", device_serial="${serial || ''}")\n\n`;
+    const lvBlock = _serializeLocalVars(localVars.value);
+    if (lvBlock) y += lvBlock + '\n';
     if (_extraLines.value) _extraLines.value.forEach(l => { y += l + '\n'; });
     steps.value.forEach(s => {
       const sep = s.remark ? `# --step-- ${s.remark}` : '# --step--';
@@ -398,13 +424,7 @@ export function useTask() {
   }
 
   function elementFromNode(node) {
-    const selector = {};
-    if (node.text) selector.text = node.text;
-    if (node.resourceId) selector.resourceId = node.resourceId;
-    if (node._type) selector.className = node._type;
-    if (node.xpath) selector.xpath = node.xpath;
-    if (node.description) selector.description = node.description;
-    if (node.index !== undefined && node.index !== null && node.index >= 0) selector.index = node.index;
+    const selector = selectorFromNode(node);
     const step = { stepType: 'element', selector, elementAction: 'click', elementParams: {}, _status: 'pending', _detail: '', _duration: null };
     step.code = generateElementCode(step);
     return step;
@@ -537,12 +557,59 @@ export function useTask() {
     }
   }
 
+  // ── LOCAL_VARS 块（用例特有变量字典）解析 / 序列化 ─────────────────────
+  // 约定：用例文件顶层声明 `LOCAL_VARS = {...}`，编辑器自动 parse 出来。
+  // 仅支持 JSON 兼容值（字符串 / 数字 / bool / null），不支持嵌套 Python repr 字面量。
+  // 多行格式按 4-space 缩进、允许末尾逗号；超出此规范的 dict 视为无 LOCAL_VARS。
+  function _extractLocalVarsBlock(lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*LOCAL_VARS\s*=\s*(\{.*)$/);
+      if (!m) continue;
+      let buf = m[1];
+      let end = i;
+      if (buf.trimEnd().endsWith('}')) {
+        // 单行
+      } else {
+        // 多行：累积直到独占一行的 }
+        let closed = false;
+        for (let j = i + 1; j < lines.length; j++) {
+          buf += '\n' + lines[j];
+          if (lines[j].trim() === '}' || lines[j].trim().startsWith('}')) {
+            end = j;
+            closed = true;
+            break;
+          }
+        }
+        if (!closed) return null;
+      }
+      try {
+        const obj = JSON.parse(buf.replace(/,(\s*[}\]])/g, '$1'));
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          return { vars: obj, startIdx: i, endIdx: end };
+        }
+      } catch (_) { /* fall through */ }
+      return null;
+    }
+    return null;
+  }
+
+  function _serializeLocalVars(vars) {
+    const keys = Object.keys(vars);
+    if (keys.length === 0) return '';
+    const out = ['LOCAL_VARS = {'];
+    for (const k of keys) {
+      out.push(`    ${JSON.stringify(k)}: ${JSON.stringify(vars[k])},`);
+    }
+    out.push('}');
+    return out.join('\n');
+  }
+
   return {
     // state
     yamlFiles, currentYamlFile, currentYamlContent,
     taskName, taskDesc, taskPlatform, projectId,
     taskTag, taskFeature, taskStory, taskSeverity, taskRerun,
-    steps, _extraLines, selectedStepIndex, settingsVisible, autoRun, appsCache,
+    steps, _extraLines, localVars, selectedStepIndex, settingsVisible, autoRun, appsCache,
     // constants
     SLASH_STEP, KEY_OPTIONS,
     // methods

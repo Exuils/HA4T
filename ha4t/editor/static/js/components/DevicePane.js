@@ -20,7 +20,7 @@ const TEMPLATE = `
       </el-button>
     </div>
     <div class="toolbar-right">
-      <el-button size="small" @click="enterCapture" :disabled="!device.isConnected.value || device.captureMode.value || device.swipeRecordMode.value" title="添加图片定位步骤">
+      <el-button size="small" @click="enterCapture" :disabled="!device.isConnected.value || device.captureMode.value || device.swipeRecordMode.value" :title="pom.captureMode.value ? '框选区域采集 POM 图像元素' : '添加图片定位步骤'">
         <el-icon><Picture /></el-icon>
       </el-button>
       <el-button size="small" @click="enterSwipe"   :disabled="!device.isConnected.value || device.captureMode.value || device.swipeRecordMode.value" title="录制滑动手势">
@@ -31,7 +31,7 @@ const TEMPLATE = `
       </el-button>
     </div>
   </div>
-  <div v-if="device.captureMode.value" class="capture-indicator">拖拽选择目标区域 (按 Esc 取消)</div>
+  <div v-if="device.captureMode.value" class="capture-indicator">{{ pom.captureMode.value ? '拖拽框选区域采集为 POM 图像元素' : '拖拽选择目标区域' }} (按 Esc 取消)</div>
   <div v-if="device.swipeRecordMode.value" class="capture-indicator swipe-indicator">点击截图记录滑动起点和终点 (按 Esc 取消)</div>
   <div class="canvas-area" ref="canvasArea">
     <div v-if="device.isDumping.value" class="canvas-loading-overlay">
@@ -55,8 +55,9 @@ export default {
     const task   = inject('task');
     const runner = inject('runner');
     const msg    = inject('msg');
+    const pom    = inject('pom');
 
-    const canvas = useCanvas({ device, task, runner, msg });
+    const canvas = useCanvas({ device, task, runner, msg, pom });
 
     function deviceAction(key) {
       if (!device.isConnected.value) return;
@@ -68,7 +69,7 @@ export default {
     function enterSwipe()   { device.enterSwipeRecordMode(msg); }
     function refresh()      { canvas.screenshotAndDumpHierarchy(); }
 
-    return { device, canvas, deviceAction, enterCapture, enterSwipe, refresh };
+    return { device, pom, canvas, deviceAction, enterCapture, enterSwipe, refresh };
   },
 
   mounted() {

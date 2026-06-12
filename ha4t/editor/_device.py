@@ -4,7 +4,7 @@ import abc
 import os
 import traceback
 import tempfile
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Optional, Union, Tuple
 from functools import cached_property  # python3.8+
 
 from PIL import Image
@@ -48,6 +48,14 @@ class DeviceMeta(metaclass=abc.ABCMeta):
     def dump_hierarchy(self) -> Dict:
         pass
 
+    @abc.abstractmethod
+    def find_element_rect(self, selector: Dict) -> Optional[Dict]:
+        """根据 selector dict 在当前设备上查找元素。
+
+        返回 {'x': int, 'y': int, 'width': int, 'height': int} 或 None。
+        selector 含 'image' key 由调用方拦截，本方法不应被调用到 image 元素。
+        """
+
 
 class HarmonyDevice(DeviceMeta):
     def __init__(self, serial: str):
@@ -71,16 +79,17 @@ class HarmonyDevice(DeviceMeta):
                 os.remove(path)
 
     def dump_hierarchy(self) -> BaseHierarchy:
-        packageName, pageName = self.hdc.current_app()
         raw: Dict = self.hdc.dump_hierarchy()
         hierarchy: Dict = harmony_hierarchy.convert_harmony_hierarchy(raw)
         return BaseHierarchy(
             jsonHierarchy=hierarchy,
-            activityName=pageName,
-            packageName=packageName,
             windowSize=self._display_size,
-            scale=1
+            scale=1,
         )
+
+    def find_element_rect(self, selector: Dict) -> Optional[Dict]:
+        # HdcWrapper 不暴露元素查找；返回 None 让前端标记为「不支持」
+        return None
 
 
 class AndroidDevice(DeviceMeta):
@@ -97,16 +106,40 @@ class AndroidDevice(DeviceMeta):
         return image2base64(img)
 
     def dump_hierarchy(self) -> BaseHierarchy:
-        current = self.d.app_current()
         page_xml = self.d.dump_hierarchy()
         page_json = android_hierarchy.convert_android_hierarchy(page_xml)
         return BaseHierarchy(
             jsonHierarchy=page_json,
-            activityName=current['activity'],
-            packageName=current['package'],
             windowSize=self._window_size,
-            scale=1
+            scale=1,
         )
+
+    def find_element_rect(self, selector: Dict) -> Optional[Dict]:
+        kw = {k: v for k, v in selector.items() if k in
+              ('text', 'resourceId', 'className', 'description', 'index')}
+        xpath = selector.get('xpath')
+        try:
+            if xpath:
+                el = self.d.xpath(xpath)
+                if not el.exists:
+                    return None
+                info = el.info
+            else:
+                if not kw:
+                    return None
+                el = self.d(**kw)
+                if not el.exists:
+                    return None
+                info = el.info
+        except Exception:
+            return None
+        b = info.get('bounds') or {}
+        # u2 element.info['bounds'] 形如 {'left':,'top':,'right':,'bottom':}
+        if not b or 'left' not in b:
+            return None
+        return {'x': b['left'], 'y': b['top'],
+                'width': b['right'] - b['left'],
+                'height': b['bottom'] - b['top']}
 
 
 class IosDevice(DeviceMeta):
@@ -137,22 +170,42 @@ class IosDevice(DeviceMeta):
         img: Image.Image = self.client.screenshot()
         return image2base64(img)
 
-    def _current_bundle_id(self) -> str:
-        resp = request("GET", f"{self.wda_url}/wda/activeAppInfo", timeout=10).json()
-        bundleId = resp.get("value", {}).get("bundleId", None)
-        return bundleId
-
     def dump_hierarchy(self) -> BaseHierarchy:
         self.client.appium_settings({"snapshotMaxDepth": self.max_depth})
         data: Dict = self.client.source(format="json")
         hierarchy: Dict = ios_hierarchy.convert_ios_hierarchy(data, self.scale)
         return BaseHierarchy(
             jsonHierarchy=hierarchy,
-            activityName=None,
-            packageName=self._current_bundle_id(),
             windowSize=self._window_size,
-            scale=self.scale
+            scale=self.scale,
         )
+
+    def find_element_rect(self, selector: Dict) -> Optional[Dict]:
+        # iOS WDA 不支持 resourceId；按 best-effort 映射到 wda 查询参数
+        kw = {}
+        if selector.get('text'):
+            kw['label'] = selector['text']
+        if selector.get('className'):
+            kw['className'] = selector['className']
+        if selector.get('description'):
+            kw['name'] = selector['description']
+        xpath = selector.get('xpath')
+        try:
+            if xpath:
+                el = self.client.xpath(xpath)
+            else:
+                if not kw:
+                    return None
+                el = self.client(**kw)
+            if not el.exists:
+                return None
+            bounds = el.bounds  # wda Rect：x, y, width, height（point space）
+        except Exception:
+            return None
+        # 乘 scale 转 pixel space（与 hierarchy rect 同坐标系）
+        s = self.scale or 1
+        return {'x': int(bounds.x * s), 'y': int(bounds.y * s),
+                'width': int(bounds.width * s), 'height': int(bounds.height * s)}
 
 
 def get_device(platform: str, serial: str, wda_url: str, max_depth: int) -> Union[HarmonyDevice, AndroidDevice, IosDevice]:
