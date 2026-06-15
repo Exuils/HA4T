@@ -829,3 +829,60 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 .pom-el-sel-missing {
   color: #f56c6c; font-style: italic;
 }
+
+/* ── Allure 报告 tab ────────────────────────────────────────────── */
+.allure-pane {
+  display: flex; flex-direction: column;
+  height: 100%; overflow: hidden;
+}
+.allure-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bd);
+}
+.allure-toolbar-title { font-size: 13px; font-weight: 600; color: var(--fg); }
+.allure-toolbar-hint  { font-size: 11px; color: var(--fg-2); }
+
+.allure-empty {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--fg-2); font-size: 12px; line-height: 1.8; text-align: center;
+  padding: 24px;
+}
+.allure-empty.allure-error { color: #f56c6c; }
+
+.allure-list {
+  flex: 1; overflow: auto;
+  padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.allure-card {
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+}
+.allure-card-pass { border-left: 3px solid #67c23a; }
+.allure-card-fail { border-left: 3px solid #f56c6c; }
+.allure-card-head {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 6px;
+}
+.allure-card-name { font-size: 13px; font-weight: 600; color: var(--fg); }
+.allure-card-time { font-size: 11px; color: var(--fg-2); margin-left: auto; }
+
+.allure-card-summary {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.allure-stat        { padding: 1px 6px; border-radius: 3px; background: var(--bd); color: var(--fg); }
+.allure-stat-passed { background: rgba(103,194,58,0.18); color: #67c23a; }
+.allure-stat-failed { background: rgba(245,108,108,0.18); color: #f56c6c; }
+.allure-stat-broken { background: rgba(230,162,60,0.18);  color: #e6a23c; }
+.allure-stat-skipped{ background: rgba(144,147,153,0.18); color: var(--fg-2); }
+.allure-stat-total  { color: var(--fg-2); }
+
+.allure-card-actions {
+  display: flex; gap: 6px;
+}

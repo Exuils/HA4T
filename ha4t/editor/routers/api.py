@@ -15,8 +15,8 @@ import time
 from pathlib import Path
 from typing import Union, Dict, Any, Optional, List
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import RedirectResponse, FileResponse
 
 from ha4t.editor._device import (
     list_serials, init_device, cached_devices,
@@ -1182,16 +1182,51 @@ async def ws_run_task(ws: WebSocket):
     await ws.close()
 
 
-ALLURE_REPORTS_DIR = Path.home() / "Documents" / "HA4T" / "allure-reports"
+# ── Allure 报告 ─────────────────────────────────────────────────────────
+#
+# 报告统一存进 ``<workspace>/allure-reports/<safe_name>/``：
+#  - 跟工作区同生命周期（切工作区列表跟着变；删工作区报告也一并去掉）
+#  - 不再用全局 ~/Documents/HA4T/allure-reports 池
+#  - 静态文件通过 GET /allure/{path:path} 端点动态 serve，避免 FastAPI mount
+#    必须启动时绑死目录的限制
+
+
+def _allure_dir() -> Optional[Path]:
+    """当前工作区的报告目录；未选工作区返 None。惰性创建。"""
+    if TASKS_DIR is None:
+        return None
+    d = TASKS_DIR / "allure-reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _read_report_summary(report_dir: Path) -> dict:
+    """从 ``widgets/summary.json`` 抽测试统计；缺失/损坏时返空字典让前端兜底。"""
+    summary_file = report_dir / "widgets" / "summary.json"
+    if not summary_file.exists():
+        return {}
+    try:
+        data = json.loads(summary_file.read_text(encoding="utf-8"))
+        stat = data.get("statistic", {}) or {}
+        return {
+            "passed":  int(stat.get("passed", 0)),
+            "failed":  int(stat.get("failed", 0)),
+            "broken":  int(stat.get("broken", 0)),
+            "skipped": int(stat.get("skipped", 0)),
+            "unknown": int(stat.get("unknown", 0)),
+            "total":   int(stat.get("total", 0)),
+        }
+    except (ValueError, OSError):
+        return {}
 
 
 @router.post("/tasks/{filename:path}/run-allure")
 async def run_task_allure(filename: str):
-    """Run task via pytest + Allure, return report URL.
+    """跑用例 + 生成 Allure 报告到 ``<workspace>/allure-reports/<safe>/``。返回 ``report_url``。
 
-    用例直接在工作区根运行：`from pom import ...`、`include(...)`、
-    `dev.click(image="x.png")` 全部按工作区相对路径解析。图片基准由工作区
-    `conftest.py`（pytest_configure 设 ``global_config.current_path``）负责。
+    用例直接在工作区根运行：``from pom import ...`` / ``include(...)`` /
+    ``dev.click(image="x.png")`` 全部按工作区相对路径解析。图片基准由工作区
+    ``conftest.py`` (pytest_configure 设 ``global_config.current_path``) 负责。
     """
     if TASKS_DIR is None:
         return _no_ws()
@@ -1199,7 +1234,6 @@ async def run_task_allure(filename: str):
     if not task_path.exists():
         return ApiResponse.doError(f"File not found: {filename}")
 
-    # PYTHONPATH：工作区根（pom 导入）+ 项目根（开发态 ha4t 源码树场景）。
     project_root = Path(__file__).parent.parent.parent
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "").split(os.pathsep) if env.get("PYTHONPATH") else []
@@ -1209,7 +1243,7 @@ async def run_task_allure(filename: str):
     env["PYTHONPATH"] = os.pathsep.join(existing)
 
     result_dir = TASKS_DIR / "allure-results"
-    report_dir = TASKS_DIR / "allure-report"
+    report_dir = TASKS_DIR / "allure-report"   # 临时工作目录；最终 copytree 到 <workspace>/allure-reports/<safe>/
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(task_path),
@@ -1229,10 +1263,10 @@ async def run_task_allure(filename: str):
             report_index = report_dir / "index.html"
             if report_index.exists():
                 safe_name = filename.replace('.py', '').replace('/', '_').replace('\\', '_')
-                out_dir = ALLURE_REPORTS_DIR / safe_name
+                out_dir = _allure_dir() / safe_name
                 shutil.rmtree(out_dir, ignore_errors=True)
                 shutil.copytree(report_dir, out_dir)
-                report_url = f"/allure-reports/{safe_name}/index.html"
+                report_url = f"/allure/{safe_name}/index.html"
 
         return ApiResponse.doSuccess({
             "stdout": result.stdout,
@@ -1243,6 +1277,67 @@ async def run_task_allure(filename: str):
         })
     except Exception as e:
         return ApiResponse.doError(str(e))
+
+
+@router.get("/allure-reports", response_model=ApiResponse)
+def list_allure_reports():
+    """列出当前工作区下所有 Allure 报告，按 mtime 倒序（最近在前）。"""
+    if TASKS_DIR is None:
+        return _no_ws()
+    d = _allure_dir()
+    items = []
+    for sub in d.iterdir():
+        if not sub.is_dir():
+            continue
+        index = sub / "index.html"
+        if not index.exists():
+            continue
+        stat = sub.stat()
+        items.append({
+            "name": sub.name,
+            "url": f"/allure/{sub.name}/index.html",
+            "mtime": stat.st_mtime,
+            "summary": _read_report_summary(sub),
+        })
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return ApiResponse.doSuccess({"reports": items})
+
+
+@router.delete("/allure-reports/{name}", response_model=ApiResponse)
+def delete_allure_report(name: str):
+    """删除当前工作区下指定的 Allure 报告。"""
+    if TASKS_DIR is None:
+        return _no_ws()
+    if not name or '/' in name or '\\' in name or name.startswith('.'):
+        return ApiResponse.doError("非法的报告名")
+    target = _allure_dir() / name
+    if not target.exists() or not target.is_dir():
+        return ApiResponse.doError("报告不存在")
+    shutil.rmtree(target, ignore_errors=True)
+    return ApiResponse.doSuccess({"deleted": name})
+
+
+@router.get("/allure/{path:path}")
+def serve_allure(path: str):
+    """从 ``<workspace>/allure-reports/<path>`` serve 静态报告文件。
+
+    报告本身是 Allure 生成的 SPA（index.html + js/css/data），相对路径在 page
+    内部自洽，所以路由前缀 ``/allure/<report-name>/`` 等价于把那个目录当 web root。
+    """
+    if TASKS_DIR is None:
+        raise HTTPException(status_code=404, detail="未选择工作区")
+    if not path:
+        raise HTTPException(status_code=404, detail="缺少路径")
+    base = _allure_dir().resolve()
+    target = (base / path).resolve()
+    # 防 path traversal —— 报告目录之外的文件一律拒绝
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="路径越界")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(target)
 
 
 # ── 注意：以下两个 catch-all 路由必须保持在文件末尾。 ──

@@ -3,6 +3,7 @@ import { fileNameFromName } from '../composables/useTask.js';
 import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 import KvRow from './KvRow.js';
 import CodeViewer from './CodeViewer.js';
+import AllureReportsPane from './AllureReportsPane.js';
 
 const { inject, ref, computed, nextTick, watch } = Vue;
 
@@ -18,6 +19,8 @@ const TEMPLATE = `
         @click="outerTab = 'caseEdit'">用例编辑</button>
     <button :class="['itab', outerTab === 'pom' ? 'active' : '']"
         @click="onSwitchPom">POM 采集</button>
+    <button :class="['itab', outerTab === 'allure' ? 'active' : '']"
+        @click="outerTab = 'allure'">Allure 报告</button>
   </div>
 
   <!-- ╔════ 用例编辑 tab — 原步骤编辑器 ═══════════════════════════════ ╗ -->
@@ -453,6 +456,9 @@ const TEMPLATE = `
     </div>
   </div>
 
+  <!-- ╔════ Allure 报告 tab — 列出工作区下所有报告 ══════════════════════ ╗ -->
+  <AllureReportsPane v-if="outerTab === 'allure'" />
+
   <!-- ── 用例编辑设置对话框（保留原位置） ──────────────────────────── -->
   <el-dialog title="用例设置" v-model="task.settingsVisible.value" width="520px" top="10vh">
     <el-form label-width="80px" size="small">
@@ -558,8 +564,7 @@ const TEMPLATE = `
 export default {
   name: 'StepPane',
   template: TEMPLATE,
-  components: { KvRow, CodeViewer },
-
+  components: { KvRow, CodeViewer, AllureReportsPane },
   setup() {
     const task   = inject('task');
     const device = inject('device');

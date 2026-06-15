@@ -21,10 +21,8 @@ static_dir = os.path.join(current_dir, "static")
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Mount Allure reports directory (created on demand when running with --allure)
-allure_reports_dir = os.path.join(os.path.expanduser("~"), "Documents", "HA4T", "allure-reports")
-os.makedirs(allure_reports_dir, exist_ok=True)
-app.mount("/allure-reports", StaticFiles(directory=allure_reports_dir), name="allure-reports")
+# Allure 报告由 router 的 GET /allure/{path:path} 动态从工作区 serve；不再用全局
+# mount（mount 必须启动时绑死目录，无法跟着工作区切换）。
 
 app.include_router(api.router)
 

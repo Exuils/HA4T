@@ -251,3 +251,15 @@ export async function getFileRaw(path) {
   const response = await fetch(`${API_HOST}files/raw?path=${encodeURIComponent(path)}`);
   return checkResponse(response);
 }
+
+// ── Allure 报告 ─────────────────────────────────────────────
+
+export async function listAllureReports() {
+  const response = await fetch(`${API_HOST}allure-reports`);
+  return checkResponse(response);
+}
+
+export async function deleteAllureReport(name) {
+  const response = await fetch(`${API_HOST}allure-reports/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  return checkResponse(response);
+}
