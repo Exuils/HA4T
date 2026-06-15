@@ -20,44 +20,38 @@ export function usePomVerify({ pom, device, msg }) {
     return sel && typeof sel === 'object' && 'image' in sel;
   }
 
-  // 串行扫指定一批元素；`names=null` 表示全量重扫（清空旧 results）。
-  // 增量扫（names 给定）只动这批元素的 result，其它项保持不变。
-  async function _scan(names = null) {
+  // 在验证模式下串行扫指定一批元素，**already-found 项一律保留不动**——
+  // 用户语义：一旦某元素曾被定位到，就算后续切了页面找不到了也不刷掉，直到点
+  // 「完成验证」(endVerify) 才清空。这让用户可以分多次切不同界面把没找到的逐
+  // 个扫齐，永远不会丢已经成功过的。
+  async function _scan(names) {
     if (!verifyMode.value) return;
     const gen = ++_scanGen;
     const platform = device.platform.value;
     const serial   = device.serial.value;
     if (!platform || !serial) { msg.warn('设备未连接'); return; }
-    const allEntries = Object.entries(pom.elements.value);
 
-    if (names === null) {
-      // 全量：先把所有元素铺成 pending / manual，再串行扫
-      const next = {};
-      for (const [name, sel] of allEntries) {
-        next[name] = _isManualOnly(sel)
-          ? { status: 'manual',  rect: null, error: null }
-          : { status: 'pending', rect: null, error: null };
-      }
-      results.value = next;
-      names = allEntries.map(([n]) => n);
-    } else {
-      // 增量：只把待扫的几个置 pending，其它项原样保留
-      const next = { ...results.value };
-      for (const n of names) {
-        const sel = pom.elements.value[n];
-        if (sel === undefined) continue;  // 元素已删
-        next[n] = _isManualOnly(sel)
-          ? { status: 'manual',  rect: null, error: null }
-          : { status: 'pending', rect: null, error: null };
-      }
-      results.value = next;
+    // 把待扫元素中尚未 found 的项置 pending；已 found / manual / unsupported 不动。
+    const next = { ...results.value };
+    for (const n of names) {
+      const sel = pom.elements.value[n];
+      if (sel === undefined) continue;                       // 元素已被删
+      if (next[n] && next[n].status === 'found') continue;   // 粘性：保留
+      next[n] = _isManualOnly(sel)
+        ? { status: 'manual',  rect: null, error: null }
+        : { status: 'pending', rect: null, error: null };
     }
+    results.value = next;
 
-    // 串行扫 selector 元素 — ADB/WDA 并发查找易锁竞争，先按串行交付
+    // 串行扫 — ADB/WDA 并发查找易锁竞争。
     for (const name of names) {
       const sel = pom.elements.value[name];
       if (sel === undefined) continue;
       if (_isManualOnly(sel)) continue;
+      // 已 found 的不再发请求 —— 节省 ADB 往返。
+      const cur = results.value[name];
+      if (cur && cur.status === 'found') continue;
+
       let r;
       try {
         const res = await pomVerifySelector({ platform, serial, selector: sel });
@@ -72,32 +66,40 @@ export function usePomVerify({ pom, device, msg }) {
         r = { status: 'not_found', rect: null, error: e.message };
       }
       if (gen !== _scanGen || !verifyMode.value) return;   // 过期扫描，丢弃
+      // 二次防御：响应到达时如果已经被别的轮次刷成 found，依然保留。
+      const now = results.value[name];
+      if (now && now.status === 'found') continue;
       results.value = { ...results.value, [name]: r };
     }
   }
 
-  // 兼容名（onHierarchyUpdated / beginVerify 等内部调用方法名不变）
-  async function _scanOnce() { return _scan(null); }
-
   function beginVerify() {
     if (!pom.currentFile.value) { msg.warn('请先选择 Page'); return; }
     if (!device.isConnected.value) { msg.warn('设备未连接'); return; }
-    pom.captureMode.value = false;   // 采集 / 验证互斥
+    pom.captureMode.value = false;          // 采集 / 验证互斥
     verifyMode.value = true;
-    _scan(null);
+    results.value = {};                      // 进入验证时清一次，进入后只增不减
+    _scan(Object.keys(pom.elements.value));
   }
 
-  // 重新验证「未找到」的元素 —— 用户场景：第一次验证时部分页面还没打开，
-  // 切到对应页面再点这个按钮，把没命中的元素再扫一遍，已命中 / manual / unsupported
-  // 一律保持原状态不动；没"未找到"项时什么也不做并提示。
-  function rescanFailures() {
+  // 重扫所有「尚未 found」的元素（not_found / pending / undefined）。
+  // 在验证过程中用户点工具栏「刷新」反复调用，已 found 的永远不动。
+  function rescanPending() {
     if (!verifyMode.value) { msg.warn('未进入验证模式'); return; }
-    const failed = Object.entries(results.value)
-      .filter(([, r]) => r && r.status === 'not_found')
-      .map(([n]) => n);
-    if (!failed.length) { msg.success && msg.success('全部已通过，无需重扫'); return; }
-    _scan(failed);
+    const all = Object.keys(pom.elements.value);
+    const targets = all.filter(n => {
+      const r = results.value[n];
+      return !r || (r.status !== 'found' && r.status !== 'manual' && r.status !== 'unsupported');
+    });
+    if (!targets.length) {
+      msg.success && msg.success('全部已通过');
+      return;
+    }
+    _scan(targets);
   }
+
+  // 兼容旧外部钩子名（早期代码里有人调）。
+  async function _scanOnce() { return rescanPending(); }
 
   function endVerify() {
     verifyMode.value = false;
@@ -105,12 +107,21 @@ export function usePomVerify({ pom, device, msg }) {
     results.value = {};
   }
 
-  // 外部钩子：hierarchy 重新 dump 成功后（window._pomVerifyOnHierarchy）、
-  // 元素编辑/删除后（usePom.updateElement / removeElement）触发重扫。
-  function onHierarchyUpdated() {
-    if (verifyMode.value) _scanOnce();
+  // 元素改名 / 改 selector / 删除时的回调：扫一次该元素，不动其它项。
+  // （删除场景下 sel 已不在 pom.elements，_scan 会跳过 —— 那就只起到把它从
+  // results 里抹掉的副作用，靠下面这两行 prune 显式删掉。）
+  function revalidateElement(name) {
+    if (!verifyMode.value) return;
+    // 先把这一项的旧 result 清掉（特别是 sticky-found 的 selector 已变，得让它重判）
+    if (results.value[name]) {
+      const next = { ...results.value };
+      delete next[name];
+      results.value = next;
+    }
+    if (pom.elements.value[name] !== undefined) {
+      _scan([name]);
+    }
   }
-
   // ── 单元素临时高亮（持续 N 毫秒，不进入 verify 模式） ─────────────────
   // 列表行的「高亮」按钮调用：调一次后端定位 → 在 canvas overlay 上画 3s 方框，
   // 不污染 results / verifyMode。 image 元素后端不支持，前端直接拒绝。
@@ -144,5 +155,5 @@ export function usePomVerify({ pom, device, msg }) {
     }
   }
 
-  return { verifyMode, results, beginVerify, endVerify, rescanFailures, onHierarchyUpdated, flashOne };
+  return { verifyMode, results, beginVerify, endVerify, rescanPending, revalidateElement, flashOne };
 }

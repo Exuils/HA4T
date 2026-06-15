@@ -191,8 +191,6 @@ export function useCanvas({ device, task, runner, msg, pom }) {
         const hier = hierRes.data;
         const rootNode = hier.jsonHierarchy || hier;
         device.jsonHierarchy.value = rootNode;
-        // POM 验证模式下，层级刷新 → 自动重扫（App.js onMounted 挂的钩子）
-        if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
         if (hier.windowSize) {
           device.displaySize.value = hier.windowSize;
           device.scale.value = hier.scale || 1;

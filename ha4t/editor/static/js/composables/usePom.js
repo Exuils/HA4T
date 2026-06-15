@@ -267,7 +267,8 @@ export function usePom() {
     elementDocs.value = nextDocs;
 
     saveCurrentPage();
-    if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
+    // 验证模式下：单独重判这个元素（rename 时也用 nn —— 新 key）；不动其它项。
+    if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(nn);
     return true;
   }
 
@@ -279,7 +280,7 @@ export function usePom() {
     delete nextDocs[name];
     elementDocs.value = nextDocs;
     saveCurrentPage();
-    if (window._pomVerifyOnHierarchy) window._pomVerifyOnHierarchy();
+    if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(name);
   }
 
   async function installSkill(msg) {

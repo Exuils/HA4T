@@ -218,8 +218,9 @@ export default defineComponent({
     // ── lifecycle ──────────────────────────────────────────────────────────
 
     onMounted(async () => {
-      // hierarchy 重新 dump 后自动重扫（useCanvas 调 window._pomVerifyOnHierarchy）
-      window._pomVerifyOnHierarchy = verify.onHierarchyUpdated;
+      // 验证模式下：found 永远粘性，没有任何"自动全量重扫"。usePom 改了某个元素
+      // 的 selector / 删除时，通过下面这个 window 钩子告诉 verify 只重判这一个。
+      window._pomVerifyRevalidate = verify.revalidateElement;
 
       // fetch version
       try {
