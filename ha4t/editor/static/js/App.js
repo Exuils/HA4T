@@ -52,6 +52,10 @@ const TEMPLATE = `
       <el-icon v-if="device.isDumping.value" class="is-loading"><Loading /></el-icon>
       <span>获取层级</span>
     </el-button>
+    <div class="header-current-app" v-if="device.currentApp.value" :title="currentAppFull">
+      <span class="hca-label">当前页面:</span>
+      <span class="hca-text">{{ currentAppFull }}</span>
+    </div>
     <div style="flex:1"></div>
     <div class="header-workspace" v-if="workspace.initialized.value" :title="workspace.current.value">
       <span>工作区:</span>
@@ -121,6 +125,14 @@ export default defineComponent({
       await task.refreshYamlFiles();
     }
     provide('onWorkspaceReady', reloadWorkspaceData);
+
+    // 「当前页面」显示用原样字符串：`<package> · <activity>` —— 完整不折叠，
+    // 用户能直接复制粘贴到 dev.start_app(...) 等代码场景，不会因为 UI 美化失真。
+    const currentAppFull = computed(() => {
+      const a = device.currentApp.value;
+      if (!a) return '';
+      return a.activity ? `${a.package} · ${a.activity}` : (a.package || '');
+    });
 
     const workspaceName = computed(() => {
       const p = (workspace.current.value || '').replace(/[\\/]+$/, '');
@@ -266,7 +278,7 @@ export default defineComponent({
 
     return {
       version, device, task, runner, msg,
-      workspace, workspaceName, switchWorkspace,
+      workspace, workspaceName, switchWorkspace, currentAppFull,
       onDeviceDropdown, connectDevice, doScreenshotAndDump,
       draggingLeft, draggingRight, startDragLeft, startDragRight,
     };

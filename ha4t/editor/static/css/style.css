@@ -780,3 +780,15 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 }
 /* 删掉 hljs 自带的 padding，避免和 wrap 的 padding 叠 */
 .code-viewer-pre code.hljs { padding: 10px 12px; }
+
+/* 当前前台应用（包名 + Activity）—— header 中间偏左展示，完整内容不折不截，
+   过长时换行而非省略，方便复制对照 / 直接粘到代码里。 */
+.header-current-app {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 12px;
+  font-size: 12px; color: var(--fg-2);
+  max-width: 720px;
+  white-space: normal; word-break: break-all; line-height: 1.4;
+}
+.header-current-app .hca-label { color: var(--fg-2); flex-shrink: 0; }
+.header-current-app .hca-text  { color: var(--fg); font-family: Consolas, monospace; }

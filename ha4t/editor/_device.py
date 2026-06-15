@@ -18,7 +18,7 @@ from fastapi import HTTPException
 
 from ha4t.editor._logger import logger
 from ha4t.editor._utils import file2base64, image2base64
-from ha4t.editor._models import Platform, BaseHierarchy
+from ha4t.editor._models import Platform, BaseHierarchy, CurrentApp
 from ha4t.editor.parser import android_hierarchy, ios_hierarchy, harmony_hierarchy
 
 
@@ -47,6 +47,15 @@ class DeviceMeta(metaclass=abc.ABCMeta):
 
     def dump_hierarchy(self) -> Dict:
         pass
+
+    def current_app(self) -> Optional[CurrentApp]:
+        """返回当前前台应用 {package, activity?}；失败/不支持返回 None。
+
+        默认实现 None；子类按平台覆盖。dump_hierarchy 内会调一次填入 BaseHierarchy.currentApp，
+        UI header 用来显示「当前页面：xxx」。app_current 抛错时一律吞掉返 None —— 显示功能
+        不能拖累 hierarchy 主流程。
+        """
+        return None
 
     @abc.abstractmethod
     def find_element_rect(self, selector: Dict) -> Optional[Dict]:
@@ -85,7 +94,18 @@ class HarmonyDevice(DeviceMeta):
             jsonHierarchy=hierarchy,
             windowSize=self._display_size,
             scale=1,
+            currentApp=self.current_app(),
         )
+
+    def current_app(self) -> Optional[CurrentApp]:
+        try:
+            # hmdriver2 HdcWrapper.current_app() → (bundle, ability) or (None, None)
+            pkg, page = self.hdc.current_app()
+        except Exception:
+            return None
+        if not pkg:
+            return None
+        return CurrentApp(package=pkg, activity=page or None)
 
     def find_element_rect(self, selector: Dict) -> Optional[Dict]:
         # HdcWrapper 不暴露元素查找；返回 None 让前端标记为「不支持」
@@ -106,13 +126,56 @@ class AndroidDevice(DeviceMeta):
         return image2base64(img)
 
     def dump_hierarchy(self) -> BaseHierarchy:
-        page_xml = self.d.dump_hierarchy()
+        # hierarchy dump 走 uiautomator2 jsonrpc，current_app 走 adb shell dumpsys，
+        # 是两条独立通道，IO 并行能省下 current_app 那 ~100-300ms（不阻塞主路径）。
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f_hier = ex.submit(self.d.dump_hierarchy)
+            f_app  = ex.submit(self.current_app)
+            page_xml = f_hier.result()
+            current = f_app.result()
         page_json = android_hierarchy.convert_android_hierarchy(page_xml)
         return BaseHierarchy(
             jsonHierarchy=page_json,
             windowSize=self._window_size,
             scale=1,
+            currentApp=current,
         )
+
+    # 缓存正则：第一条是 Android 焦点窗口的标准格式，第二条是 mFocusedApp 兜底
+    # （某些 OEM ROM 上 mCurrentFocus 偶尔会改写但 mFocusedApp 一直在）。
+    _RE_FOCUS_PATTERNS = None
+
+    def current_app(self) -> Optional[CurrentApp]:
+        """单次 `dumpsys window` 抽 mCurrentFocus / mFocusedApp 拿当前焦点窗口。
+
+        实测对比这台 Moto API 34 设备：
+          - u2.app_current()              ~10000ms（最坏 3 次 dumpsys fallback）
+          - dumpsys window                ~100ms，含 mCurrentFocus  ← 用这个
+          - dumpsys window windows        ~75ms 但不含 mCurrentFocus（OEM 差异）
+
+        失败 / 解析不出来 → 返 None，UI 隐藏「当前页面」标签即可，不影响主流程。
+        """
+        import re
+        if AndroidDevice._RE_FOCUS_PATTERNS is None:
+            AndroidDevice._RE_FOCUS_PATTERNS = [
+                # mCurrentFocus=Window{<hash> u0 com.x.y/.MainActivity}
+                re.compile(r"mCurrentFocus=Window\{[^}]*\s(?P<package>[^\s/]+)/(?P<activity>[^\s}]+)\}"),
+                # mFocusedApp=ActivityRecord{<hash> u0 com.x.y/.MainActivity t<task>}
+                re.compile(r"mFocusedApp=ActivityRecord\{[^}]*\s(?P<package>[^\s/]+)/(?P<activity>[^\s}]+)\s"),
+            ]
+        try:
+            out = self.d.shell(["dumpsys", "window"]).output
+        except Exception:
+            return None
+        for pat in AndroidDevice._RE_FOCUS_PATTERNS:
+            m = pat.search(out or "")
+            if m:
+                pkg = m.group("package")
+                act = m.group("activity")
+                if pkg:
+                    return CurrentApp(package=pkg, activity=act or None)
+        return None
 
     def find_element_rect(self, selector: Dict) -> Optional[Dict]:
         kw = {k: v for k, v in selector.items() if k in
@@ -178,6 +241,20 @@ class IosDevice(DeviceMeta):
             jsonHierarchy=hierarchy,
             windowSize=self._window_size,
             scale=self.scale,
+            currentApp=self.current_app(),
+        )
+
+    def current_app(self) -> Optional[CurrentApp]:
+        try:
+            # wda → {'pid', 'name', 'bundleId', 'processArguments'}；name 是 VC 标题（可能空）
+            info = self.client.app_current()
+        except Exception:
+            return None
+        if not info:
+            return None
+        return CurrentApp(
+            package=info.get('bundleId') or None,
+            activity=info.get('name') or None,   # iOS 用 VC name 作 activity 槽位
         )
 
     def find_element_rect(self, selector: Dict) -> Optional[Dict]:

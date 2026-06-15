@@ -17,6 +17,9 @@ export function useDevice() {
   // 不持久化，避免重启后看到的是上次设备的尺寸残留误导。
   const displaySize  = ref([0, 0]);
   const scale        = ref(1);
+  // 当前前台应用 {package, activity} —— 每次 dump hierarchy 由后端塞过来，
+  // UI header 显示「当前页面：xxx · yyy」。后端拿不到时为 null。
+  const currentApp   = ref(null);
   const screenshotTransform = reactive({ scale: 1, offsetX: 0, offsetY: 0 });
   const jsonHierarchy = ref({});
   const treeData     = ref([]);
@@ -35,6 +38,7 @@ export function useDevice() {
     selectedNode.value = null;
     treeData.value = [];
     devices.value = [];
+    currentApp.value = null;
     // refresh device list for the new platform
     listDevice();
   }
@@ -109,7 +113,7 @@ export function useDevice() {
 
   return {
     platform, serial, devices, isConnected, isConnecting, isDumping,
-    wdaUrl, snapshotMaxDepth, displaySize, scale, screenshotTransform,
+    wdaUrl, snapshotMaxDepth, displaySize, scale, currentApp, screenshotTransform,
     jsonHierarchy, treeData, hoveredNode, selectedNode,
     captureMode, captureStart, captureRect,
     swipeRecordMode, swipePoints, elementSelectMode,

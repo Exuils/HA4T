@@ -209,6 +209,8 @@ export function useCanvas({ device, task, runner, msg, pom }) {
           return tnode;
         };
         device.treeData.value = rootNode ? [buildTree(rootNode)] : [];
+        // 后端把当前前台应用包名 + Activity/Ability 塞进来，UI header 显示用
+        device.currentApp.value = hier.currentApp || null;
       }
     } finally { device.isDumping.value = false; }
   }

@@ -26,10 +26,22 @@ class ApiResponse(BaseModel):
         return ApiResponse(success=False, data=None, message=message)
 
 
+class CurrentApp(BaseModel):
+    """当前前台应用的标识 —— 给 UI 显示"现在在哪"用，不进 selector/POM 字段。
+
+    package    包名 / bundleId（Android: package；iOS: bundleId；Harmony: bundleName）
+    activity   Android Activity 短名（如 .LoginActivity）或 Harmony ability；
+               iOS / Flutter / Compose 单 Activity 项目可能为空
+    """
+    package: Optional[str] = None
+    activity: Optional[str] = None
+
+
 class BaseHierarchy(BaseModel):
     jsonHierarchy: Optional[Dict] = None
     windowSize: Tuple[int, int]
     scale: int = 1
+    currentApp: Optional[CurrentApp] = None
 
 
 class XPathLiteRequest(BaseModel):
