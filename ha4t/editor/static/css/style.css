@@ -816,3 +816,16 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 }
 .pom-drag-handle:hover  { opacity: 1; color: var(--fg); }
 .pom-drag-handle:active { cursor: grabbing; }
+
+/* POM 平台分桶 tab */
+.pom-platform-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0;
+}
+.pom-platform-label  { font-size: 12px; color: var(--fg-2); }
+.pom-platform-hint   { font-size: 11px; color: var(--fg-2); margin-left: 4px; opacity: 0.85; }
+
+/* 当前平台未采集的元素 selector 显示样式 */
+.pom-el-sel-missing {
+  color: #f56c6c; font-style: italic;
+}

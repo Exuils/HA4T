@@ -19,29 +19,58 @@ export function usePom() {
   const page               = ref('');
   const desc               = ref('');
   const triggers           = ref('');
+  // 元素表 —— 现在是 ElementShape：{ name: { platforms:{android:{},ios:{},harmony:{}}, image, _parent, _doc } }
+  // 前端按 currentPlatform 渲染显示，AI 读 pom/<page>.py 看到的是 Selector(...) 字面量。
   const elements           = ref({});
-  // 元素描述（自由文本）—— 后端 round-trip 到 pom/<page>.py 里每条元素上方的 `# ...` 注释，
-  // **不进 selector dict**（避免被 driver 当未知 kwarg），仅给 AI / 人读 POM 时理解元素语义。
+  // 当前显示用平台：默认从 device.platform localStorage 跟随，未连时退到 'android'。
+  // 切换不改 elements 数据，只换显示。POM tab 顶上有 platform tab 让用户独立切换
+  // 跨平台元素采集（一边连着 Android 设备但也想看 / 补 iOS 分桶）。
+  const currentPlatform    = ref(getFromLocalStorage('platform', 'android'));
+  // 兼容入口：UI 多个地方仍用扁平 docs / parents map（树渲染 / KvRow 标签等）
+  // 这两个 ref 跟 elements ShapeData 派生同步 —— 修改时都从 elements 派生。
   const elementDocs        = ref({});
-  // 元素父子关系：{ child_name: parent_name }。后端 round-trip 到 pom/<page>.py
-  // 每条元素 selector dict 的 `_parent` 字段；driver 入口自动剥 `_` 前缀拿不到。
-  // 仅 UI 层：列表渲染成树 + AI 读 POM 时理解结构（"用户名输入框 在 表单 里"）。
-  // 运行时调用形式不变 —— dev.click(**ELEMENTS[name]) 一律扁平 lookup。
   const elementParents     = ref({});
-  // Global meta
   const metaVars           = ref({});
-  // Capture state
+  // Capture / edit state
   const captureMode        = ref(false);
   const nameDialogVisible  = ref(false);
   const pendingSelector    = ref(null);
   const pendingName        = ref('');
-  const pendingDoc         = ref('');    // 命名/编辑弹框里的「说明」textarea；空串 → 不写注释
-  const pendingParent      = ref('');    // 命名弹框里的「父元素」选择；空 → 顶层
-  // Image element thumbnails — keyed by image filename, value is "data:..." URL
-  // populated by selectPage() (which fetches each referenced image once) and
-  // beginImageCapture() (which seeds it with the freshly captured screenshot).
+  const pendingDoc         = ref('');
+  const pendingParent      = ref('');
+  // 「补全模式」：用户在某条 *已存在* 的元素行点了「采集」按钮 → 下一次画布选/框
+  // 不弹命名弹框，直接替换该元素当前平台的 selector。null 表示非补全模式。
+  const pendingFillName    = ref('');
   const imageCache         = ref({});
 
+  // 取当前平台（或指定平台）的 native kwargs；不存在返回 null。
+  // image 元素直接返回 {image: '...'}（image 跨平台共享）。
+  function selectorView(name, platform) {
+    const el = elements.value[name];
+    if (!el) return null;
+    if (el.image) return { image: el.image };
+    const p = platform || currentPlatform.value;
+    return (el.platforms && el.platforms[p]) || null;
+  }
+
+  function hasSelectorOn(name, platform) {
+    const el = elements.value[name];
+    if (!el) return false;
+    if (el.image) return true;
+    const p = platform || currentPlatform.value;
+    return !!(el.platforms && el.platforms[p] && Object.keys(el.platforms[p]).length);
+  }
+
+  // 把 ElementShape map 同步派生出独立 docs / parents map（兼容老 UI 用法）。
+  function _syncDerivedMaps() {
+    const d = {}, p = {};
+    for (const [k, el] of Object.entries(elements.value)) {
+      if (el._doc) d[k] = el._doc;
+      if (el._parent) p[k] = el._parent;
+    }
+    elementDocs.value = d;
+    elementParents.value = p;
+  }
   function _msgError(msg, m) { (msg && msg.error) ? msg.error(m) : console.error(m); }
 
   async function loadPages() {
@@ -61,7 +90,6 @@ export function usePom() {
     imageCache.value = {};
     saveToLocalStorage('currentPomFile', '');
   }
-
   async function selectPage(filename, msg) {
     if (!filename) { _clearPageState(); return; }
     try {
@@ -79,6 +107,7 @@ export function usePom() {
       elements.value = res.data.elements || {};
       elementDocs.value = res.data.docs || {};
       elementParents.value = res.data.parents || {};
+      _syncDerivedMaps();
       // 拉取页面里所有 image 元素的缩略图 — fire-and-forget per file，单张失败不阻塞
       const wanted = new Set();
       for (const sel of Object.values(elements.value)) {
@@ -244,16 +273,23 @@ export function usePom() {
       _msgError(msg, 'selector 不能为空 — 至少保留一个字段');
       return;
     }
-    elements.value = { ...elements.value, [name]: selector };
-    const doc = (pendingDoc.value || '').trim();
-    if (doc) {
-      elementDocs.value = { ...elementDocs.value, [name]: doc };
-    }
+    // 包成 ElementShape：image 元素跨平台共享，其它进 currentPlatform 分桶
     const par = (pendingParent.value || '').trim();
-    // 父元素必须真实存在；空 = 顶层。校验通过才设置。
-    if (par && Object.prototype.hasOwnProperty.call(elements.value, par)) {
-      elementParents.value = { ...elementParents.value, [name]: par };
+    const doc = (pendingDoc.value || '').trim();
+    let element;
+    if (selector.image) {
+      element = { platforms: {}, image: selector.image, _parent: par, _doc: doc };
+    } else {
+      const platform = currentPlatform.value || 'android';
+      element = {
+        platforms: { [platform]: selector },
+        image: null,
+        _parent: (par && Object.prototype.hasOwnProperty.call(elements.value, par)) ? par : '',
+        _doc: doc,
+      };
     }
+    elements.value = { ...elements.value, [name]: element };
+    _syncDerivedMaps();
     saveCurrentPage();
     nameDialogVisible.value = false;
     pendingSelector.value = null;
@@ -305,34 +341,41 @@ export function usePom() {
       }
     }
 
-    // Preserve insertion order: if name unchanged, mutate in place; otherwise
-    // rebuild dict so the renamed entry stays at its original position.
+    // 写入：保留其它平台分桶不动，只更新 currentPlatform；image 元素直接替换 image 字段。
+    const prevEl = elements.value[oldName] || { platforms: {}, image: null, _parent: '', _doc: '' };
+    let nextEl;
+    if (cleaned.image) {
+      nextEl = {
+        platforms: {},                       // image 元素跨平台共享，分桶清空
+        image: cleaned.image,
+        _parent: desiredParent || '',
+        _doc: (newDoc === undefined || newDoc === null) ? (prevEl._doc || '') : String(newDoc).trim(),
+      };
+    } else {
+      const platform = currentPlatform.value || 'android';
+      const nextPlatforms = { ...(prevEl.platforms || {}) };
+      nextPlatforms[platform] = cleaned;
+      nextEl = {
+        platforms: nextPlatforms,
+        image: null,
+        _parent: desiredParent || '',
+        _doc: (newDoc === undefined || newDoc === null) ? (prevEl._doc || '') : String(newDoc).trim(),
+      };
+    }
+
+    // Preserve insertion order：rename 时整体重组，保持位置。
     const next = {};
     for (const [k, v] of Object.entries(elements.value)) {
-      next[k === oldName ? nn : k] = (k === oldName) ? cleaned : v;
+      next[k === oldName ? nn : k] = (k === oldName) ? nextEl : v;
+    }
+    // 其它元素的 _parent 指向 oldName 的 → 改成 nn
+    if (nn !== oldName) {
+      for (const [k, v] of Object.entries(next)) {
+        if (v && v._parent === oldName) next[k] = { ...v, _parent: nn };
+      }
     }
     elements.value = next;
-
-    // docs：rename 时跟着搬，doc 文本变了就更新 / 清空。
-    const nextDocs = { ...elementDocs.value };
-    delete nextDocs[oldName];
-    const docStr = (newDoc === undefined || newDoc === null)
-      ? (elementDocs.value[oldName] || '')
-      : String(newDoc);
-    const docTrimmed = docStr.trim();
-    if (docTrimmed) nextDocs[nn] = docTrimmed;
-    elementDocs.value = nextDocs;
-
-    // parents：同样 rename 跟着搬 + 把别人指向 oldName 的也改成 nn。
-    const nextParents = {};
-    for (const [child, parent] of Object.entries(elementParents.value)) {
-      const newChild  = child === oldName ? nn : child;
-      const newParent2 = parent === oldName ? nn : parent;
-      nextParents[newChild] = newParent2;
-    }
-    delete nextParents[nn];
-    if (desiredParent) nextParents[nn] = desiredParent;
-    elementParents.value = nextParents;
+    _syncDerivedMaps();
 
     saveCurrentPage();
     if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(nn);
@@ -341,28 +384,18 @@ export function usePom() {
   // 删元素：子节点上升一级（变成它原祖父的子；祖父不在则升到顶层），
   // 不递归删除。selector 独立工作，子元素的查找语义不受影响。
   function removeElement(name) {
-    const grandparent = elementParents.value[name] || '';
-    const next = { ...elements.value };
-    delete next[name];
-    elements.value = next;
-
-    const nextDocs = { ...elementDocs.value };
-    delete nextDocs[name];
-    elementDocs.value = nextDocs;
-
-    // parents map：删自己 + 把指向自己的子全部指向 grandparent（空 = 升顶层）。
-    const nextParents = {};
-    for (const [child, parent] of Object.entries(elementParents.value)) {
-      if (child === name) continue;            // 自己被删
-      if (parent === name) {
-        if (grandparent) nextParents[child] = grandparent;
-        // grandparent 为空 → 丢掉这条 entry，等同升到顶层
+    const grandparent = (elements.value[name] && elements.value[name]._parent) || '';
+    const next = {};
+    for (const [k, v] of Object.entries(elements.value)) {
+      if (k === name) continue;
+      if (v && v._parent === name) {
+        next[k] = { ...v, _parent: grandparent };
       } else {
-        nextParents[child] = parent;
+        next[k] = v;
       }
     }
-    elementParents.value = nextParents;
-
+    elements.value = next;
+    _syncDerivedMaps();
     saveCurrentPage();
     if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(name);
   }
@@ -390,10 +423,15 @@ export function usePom() {
     const build = (name, seen) => {
       if (seen.has(name)) return null;       // 防循环
       seen.add(name);
+      const el = elements.value[name] || { platforms: {}, image: null, _parent: '', _doc: '' };
+      // sel —— 兼容老 template：image 元素 {image:...}，其它取当前平台 native（可能为 null）
+      const view = el.image ? { image: el.image } : ((el.platforms && el.platforms[currentPlatform.value]) || null);
       return {
         name,
-        sel: elements.value[name],
-        doc: elementDocs.value[name] || '',
+        sel: view,                   // 当前平台 selector view（null = 未在该平台采集）
+        element: el,                 // 完整 ElementShape，UI 需要切平台时用
+        doc: el._doc || '',
+        captured: hasSelectorOn(name),
         children: (childrenMap[name] || []).map(c => build(c, seen)).filter(Boolean),
       };
     };
@@ -420,14 +458,17 @@ export function usePom() {
   return {
     // state
     pages, currentFile, page, desc, triggers, elements, elementDocs, elementParents,
-    elementTree,                                     // computed 树形视图，给 el-tree :data
+    elementTree,
     metaVars,
     captureMode, nameDialogVisible, pendingSelector, pendingName, pendingDoc, pendingParent,
+    pendingFillName,
+    currentPlatform,
     imageCache,
     // methods
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,
     loadMeta, saveMeta,
     beginCapture, beginImageCapture, setPendingSelectorField, confirmCapture,
     updateElement, removeElement, setElementParent, installSkill,
+    selectorView, hasSelectorOn,
   };
 }

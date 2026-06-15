@@ -1,4 +1,22 @@
 # -*- coding: utf-8 -*-
+"""HA4T —— 跨平台 UI 自动化测试框架。
+
+核心抽象：
+- ``connect(platform=...)`` 返回 ``Device``，所有平台同一套 API：
+    ``dev.click(...)`` / ``dev.swipe(...)`` / ``dev.wait(...)`` / ``dev.assert_element(...)`` ...
+- ``Selector`` 类承载跨平台元素定位器：::
+
+    from ha4t import connect, Selector
+    LOGIN = Selector(android={"text": "登录"}, ios={"label": "Login"})
+    dev = connect(platform="android")
+    dev.click(LOGIN)                       # 平台分桶自动选 android 分支
+
+- 临时定位也接受 canonical kwargs，自动按当前平台翻译：::
+
+    dev.click(text="登录")                 # iOS 上自动用 label='登录'
+
+POM 工程化用法见 ``ha4t/editor/skills/ha4t-case-writer/SKILL.md``。
+"""
 __version__ = "0.1.6"
 __all__ = ["__version__", "Device", "connect", "include", "Selector", "SelectorNotAvailableError"]
 

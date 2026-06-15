@@ -275,6 +275,18 @@ const TEMPLATE = `
         <el-button size="small" @click="pom.installSkill(msg)">装 Skill</el-button>
       </div>
 
+      <!-- 平台 tab —— 显示当前平台分桶；切换只换显示，不动数据 -->
+      <div class="pom-platform-row" v-if="pom.currentFile.value">
+        <span class="pom-platform-label">平台</span>
+        <el-radio-group :model-value="pom.currentPlatform.value"
+            @update:modelValue="v => pom.currentPlatform.value = v" size="small">
+          <el-radio-button label="android">Android</el-radio-button>
+          <el-radio-button label="ios">iOS</el-radio-button>
+          <el-radio-button label="harmony">Harmony</el-radio-button>
+        </el-radio-group>
+        <span class="pom-platform-hint">切换只换显示。新采集进入当前选中平台的分桶；image 元素跨平台共享。</span>
+      </div>
+
       <!-- 当前 page 元数据：desc / triggers，单行紧凑（用 prepend 替代独立 label）-->
       <div class="pom-meta-row" v-if="pom.currentFile.value">
         <el-input :model-value="pom.desc.value" @update:modelValue="v => pom.desc.value = v" @blur="pom.saveCurrentPage" size="small" placeholder="如：登录页">
@@ -339,9 +351,13 @@ const TEMPLATE = `
                   <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
                   <span class="pom-el-sel" :title="nodeData.sel.image">{{ nodeData.sel.image }}</span>
                 </template>
-                <template v-else>
+                <template v-else-if="nodeData.sel">
                   <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
                   <span class="pom-el-sel" :title="JSON.stringify(nodeData.sel)">{{ formatSelector(nodeData.sel) }}</span>
+                </template>
+                <template v-else>
+                  <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
+                  <span class="pom-el-sel pom-el-sel-missing" :title="`未在 ${pom.currentPlatform.value} 上采集`">未采集 ({{ pom.currentPlatform.value }})</span>
                 </template>
                 <template v-if="verify.verifyMode.value">
                   <el-icon v-if="statusOf(nodeData.name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
@@ -353,7 +369,10 @@ const TEMPLATE = `
                 <el-tooltip v-if="nodeData.doc" :content="nodeData.doc" placement="top" :show-after="200">
                   <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
                 </el-tooltip>
-                <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)" @click.stop="verify.flashOne(nodeData.name, nodeData.sel)" title="高亮 3 秒"><el-icon><View /></el-icon></el-button>
+                <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)"
+                    :disabled="!nodeData.sel"
+                    @click.stop="verify.flashOne(nodeData.name, nodeData.sel)"
+                    title="高亮 3 秒（仅当前平台 selector 可用时）"><el-icon><View /></el-icon></el-button>
                 <el-button size="small" @click.stop="beginEditElement(nodeData.name, nodeData.sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
                 <el-button size="small" @click.stop="pom.removeElement(nodeData.name)" title="删除（子节点会上升到当前父级）"><el-icon><Close /></el-icon></el-button>
               </div>

@@ -49,7 +49,7 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(_page_filename("登录Page"), "登录Page.py")
 
     def test_render_then_parse_roundtrip(self):
-        """渲染 → 解析 → 元素 / meta 完全一致（page 文件不再有 VARS）。"""
+        """渲染 → 解析 → ElementShape 完全保留（page 文件不再有 VARS）。"""
         elements = {
             "btn_a": {"text": "登录", "resourceId": "com.x:id/login"},
             "with_quote": {"text": "say \"hi\""},
@@ -61,8 +61,11 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(parsed["meta"]["page"], "LoginPage")
         self.assertEqual(parsed["meta"]["desc"], "登录页")
         self.assertEqual(parsed["meta"]["triggers"], "登录,login")
-        self.assertEqual(parsed["elements"], elements)
-        self.assertEqual(parsed["vars"], {})  # page 文件无 VARS
+        # 老 flat dict 入参 → 自动迁移成 ElementShape 进 android 分桶
+        self.assertEqual(parsed["elements"]["btn_a"]["platforms"], {"android": {"text": "登录", "resourceId": "com.x:id/login"}})
+        self.assertEqual(parsed["elements"]["with_index"]["platforms"]["android"]["index"], 3)
+        self.assertEqual(parsed["elements"]["tricky"]["platforms"]["android"]["xpath"], elements["tricky"]["xpath"])
+        self.assertEqual(parsed["vars"], {})
 
     def test_render_then_parse_chinese_keys(self):
         """元素 key 允许中文，repr/literal_eval 应保留原字符。"""
@@ -76,7 +79,8 @@ class TestPomHelpers(unittest.TestCase):
         self.assertIn("用户名输入框", py)
         parsed = _parse_pom_py(py)
         self.assertEqual(parsed["meta"]["page"], "登录页")
-        self.assertEqual(parsed["elements"], elements)
+        self.assertEqual(parsed["elements"]["登录按钮"]["platforms"]["android"], elements["登录按钮"])
+        self.assertEqual(parsed["elements"]["tab_home"]["platforms"]["android"]["text"], "首页")
 
     def test_render_meta_roundtrip(self):
         vars_ = {"package": "com.example.app", "base_url": "https://x.test", "timeout": 10}
@@ -101,7 +105,7 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(parsed["elements"], {})
 
     def test_render_then_parse_docs_roundtrip(self):
-        """docs 写出为元素上方的 `# ...` 注释，解析时按行回填到 docs 字典。"""
+        """docs 写入 Selector(_doc=...) 字段，解析时回填到 docs 字典 + ElementShape._doc。"""
         elements = {
             "登录按钮": {"text": "登录"},
             "商品项":   {"xpath": "//*[@id='list']/View"},
@@ -111,17 +115,20 @@ class TestPomHelpers(unittest.TestCase):
             "商品项":   "列表项模板。用例调用时追加 [index] 选第几个（1-based）。\nindex 由测试数据决定。",
         }
         py = _render_pom_py("商品页", "", "", elements, docs)
-        # 渲染输出每条 doc 落在元素上方
-        self.assertIn("    # 顶部主按钮，点击进入登录态\n    '登录按钮'", py)
-        # 多行 doc 拆成多行 `# ...`
-        self.assertIn("    # 列表项模板。用例调用时追加 [index] 选第几个（1-based）。\n    # index 由测试数据决定。\n    '商品项'", py)
+        # 渲染输出每条 doc 进 Selector(_doc=...) 字段
+        self.assertIn("_doc='顶部主按钮，点击进入登录态'", py)
+        # 多行 doc 用 \n 字面量保留在 _doc 字段里
+        self.assertIn("index 由测试数据决定", py)
 
         parsed = _parse_pom_py(py)
-        self.assertEqual(parsed["elements"], elements)
         self.assertEqual(parsed["docs"], docs)
 
     def test_parse_preserves_handwritten_comment(self):
-        """用户手工在 pom/<page>.py 里写注释 → GET 时被读回，编辑器后续 save 保留。"""
+        """用户手工在 pom/<page>.py 里写注释 → GET 时被读回，编辑器后续 save 保留。
+
+        老格式（无 Selector），doc 走顶上 `#` 注释；新格式 Selector(_doc=...)
+        优先生效。这条测试覆盖老兼容。
+        """
         py = (
             "# -*- coding: utf-8 -*-\n"
             "# kind: pom\n"
@@ -136,7 +143,7 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(parsed["docs"], {"登录按钮": "人写的注释"})
 
     def test_parse_blank_line_truncates_doc(self):
-        """元素与注释之间有空行 → 注释不属于该元素（视作模块/段落注释，丢弃）。"""
+        """老格式：元素与注释之间有空行 → 注释不属于该元素。"""
         py = (
             "ELEMENTS = {\n"
             "    # 这是模块说明\n"
@@ -148,14 +155,14 @@ class TestPomHelpers(unittest.TestCase):
         self.assertEqual(parsed["docs"], {})
 
     def test_render_no_docs_unchanged(self):
-        """docs 为空或某 key 没 doc → 不写注释行。保持向后兼容。"""
+        """docs 为空 / 某 key 没 doc → 不写 _doc 字段。保持简洁。"""
         py = _render_pom_py("P", "", "", {"a": {"text": "x"}}, None)
-        self.assertNotIn("#", py.split("ELEMENTS")[1])  # ELEMENTS 之后段不再有 #
+        self.assertNotIn("_doc=", py)
         py2 = _render_pom_py("P", "", "", {"a": {"text": "x"}}, {})
         self.assertEqual(py, py2)
 
     def test_parent_roundtrip(self):
-        """`_parent` 字段：render 时塞进 selector dict、parse 时拆出来到 parents map。"""
+        """`_parent` 字段：render 进 Selector(_parent=...)；parse 拆到 parents map。"""
         elements = {
             "顶部导航": {"resourceId": "com.x:id/top"},
             "返回按钮": {"text": "返回"},
@@ -164,23 +171,55 @@ class TestPomHelpers(unittest.TestCase):
         }
         parents = {"返回按钮": "顶部导航", "标题": "顶部导航"}
         py = _render_pom_py("登录页", "", "", elements, None, parents)
-        # selector dict 序列化里应当含 `_parent`
-        self.assertIn("'_parent': '顶部导航'", py)
-        # 顶层元素没塞 `_parent`
-        self.assertNotIn("'登录按钮': {'text': '登录', '_parent'", py)
+        # selector 不再嵌 _parent —— 它现在是 Selector 顶层 kwarg
+        self.assertIn("_parent='顶部导航'", py)
+        # 顶层元素没塞 _parent
+        self.assertNotIn("'登录按钮': Selector(_parent=", py)
 
         parsed = _parse_pom_py(py)
-        # elements 应当已剥掉 `_parent`，回到 selector 纯净
-        self.assertEqual(parsed["elements"]["返回按钮"], {"text": "返回"})
-        self.assertEqual(parsed["elements"]["顶部导航"], {"resourceId": "com.x:id/top"})
-        # parents map 完整还原
         self.assertEqual(parsed["parents"], parents)
+        # elements 是 ElementShape；返回按钮的 _parent 在 shape 里
+        self.assertEqual(parsed["elements"]["返回按钮"]["_parent"], "顶部导航")
+        self.assertEqual(parsed["elements"]["顶部导航"]["_parent"], "")
+        self.assertEqual(parsed["elements"]["顶部导航"]["platforms"]["android"], {"resourceId": "com.x:id/top"})
 
     def test_no_parent_emits_empty_map(self):
-        """完全没父子关系的 page → parents=={}。"""
         py = _render_pom_py("P", "", "", {"a": {"text": "x"}})
         parsed = _parse_pom_py(py)
         self.assertEqual(parsed["parents"], {})
+
+    def test_selector_literal_roundtrip(self):
+        """直接传新 ElementShape（含多平台分桶 + _parent + _doc）→ 渲染 → 解析回来一致。"""
+        elements = {
+            "顶部导航": {
+                "platforms": {"android": {"resourceId": "com.x:id/top"}, "ios": {"label": "Header"}},
+                "image": None, "_parent": "", "_doc": "顶部容器",
+            },
+            "返回按钮": {
+                "platforms": {"android": {"text": "返回"}, "ios": {"label": "Back"}},
+                "image": None, "_parent": "顶部导航", "_doc": "",
+            },
+            "登录图标": {
+                "platforms": {}, "image": "login_icon.png",
+                "_parent": "", "_doc": "跨平台共享图像",
+            },
+        }
+        py = _render_pom_py("LoginPage", "登录页", "", elements)
+        # 输出格式
+        self.assertIn("from ha4t import Selector", py)
+        self.assertIn("Selector(_doc='顶部容器'", py)
+        self.assertIn("ios={'label': 'Back'}", py)
+        self.assertIn("Selector(_doc='跨平台共享图像', image='login_icon.png')", py)
+
+        parsed = _parse_pom_py(py)
+        self.assertEqual(parsed["elements"]["顶部导航"]["platforms"]["android"], {"resourceId": "com.x:id/top"})
+        self.assertEqual(parsed["elements"]["顶部导航"]["platforms"]["ios"], {"label": "Header"})
+        self.assertEqual(parsed["elements"]["返回按钮"]["_parent"], "顶部导航")
+        self.assertEqual(parsed["elements"]["登录图标"]["image"], "login_icon.png")
+        self.assertEqual(parsed["elements"]["登录图标"]["platforms"], {})
+        # docs / parents 并列字典
+        self.assertEqual(parsed["docs"]["顶部导航"], "顶部容器")
+        self.assertEqual(parsed["parents"]["返回按钮"], "顶部导航")
 
 class TestPomEndpoints(unittest.TestCase):
     """端点循环：create → list → get → save(更新) → delete + __init__ 验证。"""
@@ -238,7 +277,7 @@ class TestPomEndpoints(unittest.TestCase):
         self.assertEqual(data["desc"], "登录页")
         self.assertEqual(data["elements"], {})
 
-        # update LoginPage with elements
+        # update LoginPage with elements (老 flat dict 入参 — 后端 lazy migrate 进 android 分桶)
         new_elements = {"login_button": {"resourceId": "com.x:id/login", "text": "登录"}}
         self._ok(self.client.post("/pom/pages", json={
             "page": "LoginPage", "desc": "登录页", "triggers": "登录,login",
@@ -246,7 +285,8 @@ class TestPomEndpoints(unittest.TestCase):
         }))
 
         data = self._ok(self.client.get("/pom/pages/login_page.py"))
-        self.assertEqual(data["elements"], new_elements)
+        # 响应是 ElementShape：扁平 dict 自动进 android 分桶
+        self.assertEqual(data["elements"]["login_button"]["platforms"]["android"], new_elements["login_button"])
         self.assertEqual(data["triggers"], "登录,login")
 
         # __init__.py 应含 alias
@@ -299,12 +339,13 @@ class TestPomEndpoints(unittest.TestCase):
 
         data = self._ok(self.client.get("/pom/pages/test_page.py"))
         self.assertEqual(list(data["elements"].keys()), ["btn_a", "确认按钮", "btn_c"])
-        self.assertEqual(data["elements"]["确认按钮"]["text"], "确定")
-        self.assertEqual(data["elements"]["确认按钮"]["xpath"], "//Button[@text='确定']")
-        self.assertNotIn("resourceId", data["elements"]["确认按钮"])
+        confirm = data["elements"]["确认按钮"]["platforms"]["android"]
+        self.assertEqual(confirm["text"], "确定")
+        self.assertEqual(confirm["xpath"], "//Button[@text='确定']")
+        self.assertNotIn("resourceId", confirm)
         # 未编辑的相邻元素保持不变
-        self.assertEqual(data["elements"]["btn_a"], {"text": "A", "resourceId": "x:id/a"})
-        self.assertEqual(data["elements"]["btn_c"], {"text": "C"})
+        self.assertEqual(data["elements"]["btn_a"]["platforms"]["android"], {"text": "A", "resourceId": "x:id/a"})
+        self.assertEqual(data["elements"]["btn_c"]["platforms"]["android"], {"text": "C"})
 
         # 仅改 selector 字段（不重命名）：去掉一个字段，新增一个字段
         edited2 = dict(edited)
@@ -314,7 +355,7 @@ class TestPomEndpoints(unittest.TestCase):
             "elements": edited2,
         }))
         data = self._ok(self.client.get("/pom/pages/test_page.py"))
-        self.assertEqual(data["elements"]["btn_a"], {"description": "首字母 A 的按钮"})
+        self.assertEqual(data["elements"]["btn_a"]["platforms"]["android"], {"description": "首字母 A 的按钮"})
 
     def test_image_element_lifecycle(self):
         """图像元素：{'image': 'fname.png'} 与 selector 元素同源存储，
@@ -328,12 +369,15 @@ class TestPomEndpoints(unittest.TestCase):
             "elements": mixed,
         }))
         data = self._ok(self.client.get("/pom/pages/game_page.py"))
-        self.assertEqual(data["elements"]["登录按钮"]["text"], "登录")
-        self.assertEqual(data["elements"]["游戏开始按钮"], {"image": "pom_GamePage_1700000000.png"})
+        self.assertEqual(data["elements"]["登录按钮"]["platforms"]["android"]["text"], "登录")
+        # image 元素：image 字段非空，platforms 为空
+        img = data["elements"]["游戏开始按钮"]
+        self.assertEqual(img["image"], "pom_GamePage_1700000000.png")
+        self.assertEqual(img["platforms"], {})
 
         # 磁盘文件包含 image 文件名字面量
         page_text = (Path(self.tmp) / "pom" / "game_page.py").read_text(encoding="utf-8")
-        self.assertIn("'image': 'pom_GamePage_1700000000.png'", page_text)
+        self.assertIn("'pom_GamePage_1700000000.png'", page_text)
 
         # import 后能拿到 image 字段
         sys.path.insert(0, self.tmp)
@@ -341,15 +385,12 @@ class TestPomEndpoints(unittest.TestCase):
             if name == "pom" or name.startswith("pom."):
                 del sys.modules[name]
         pom_pkg = importlib.import_module("pom")
-        self.assertEqual(
-            pom_pkg.GamePage.ELEMENTS["游戏开始按钮"],
-            {"image": "pom_GamePage_1700000000.png"},
-        )
-        # 模拟用例 `dev.click(**ELEMENTS["游戏开始按钮"])` 的 kwarg 展开
-        kwargs = pom_pkg.GamePage.ELEMENTS["游戏开始按钮"]
-        self.assertEqual(kwargs.get("image"), "pom_GamePage_1700000000.png")
-        self.assertNotIn("text", kwargs)
-        self.assertNotIn("resourceId", kwargs)
+        # 新格式：image 元素是 Selector 实例，.image 拿文件名，.for_platform 拿 kwargs
+        img_sel = pom_pkg.GamePage.ELEMENTS["游戏开始按钮"]
+        self.assertEqual(img_sel.image, "pom_GamePage_1700000000.png")
+        # 任何平台 for_platform 都返回 {'image': ...}（image 元素跨平台一致）
+        for plat in ("android", "ios", "harmony"):
+            self.assertEqual(img_sel.for_platform(plat), {"image": "pom_GamePage_1700000000.png"})
 
     def test_invalid_page_name(self):
         # 数字开头：非法标识符
@@ -382,7 +423,9 @@ class TestPomEndpoints(unittest.TestCase):
 
         data = self._ok(self.client.get("/pom/pages/登录页.py"))
         self.assertEqual(data["page"], "登录页")
-        self.assertEqual(data["elements"], elements)
+        # 响应是 ElementShape：原 flat dict → android 分桶
+        self.assertEqual(data["elements"]["登录按钮"]["platforms"]["android"], elements["登录按钮"])
+        self.assertEqual(data["elements"]["用户名输入框"]["platforms"]["android"], elements["用户名输入框"])
 
         # __init__.py 应包含中文 alias
         init_text = (Path(self.tmp) / "pom" / "__init__.py").read_text(encoding="utf-8")
@@ -393,15 +436,15 @@ class TestPomEndpoints(unittest.TestCase):
         self.assertIn("'登录按钮'", page_text)
         self.assertIn("'用户名输入框'", page_text)
 
-        # 可被 import，且能按中文 key 取元素
+        # 可被 import，且能按中文 key 取 Selector 实例
         sys.path.insert(0, self.tmp)
         for name in list(sys.modules):
             if name == "pom" or name.startswith("pom."):
                 del sys.modules[name]
         pom_pkg = importlib.import_module("pom")
         page = getattr(pom_pkg, "登录页")
-        self.assertEqual(page.ELEMENTS["登录按钮"]["text"], "登录")
-        self.assertEqual(page.ELEMENTS["用户名输入框"]["className"], "EditText")
+        self.assertEqual(page.ELEMENTS["登录按钮"].for_platform("android"), elements["登录按钮"])
+        self.assertEqual(page.ELEMENTS["用户名输入框"].for_platform("android"), elements["用户名输入框"])
 
     def test_meta_get_creates_default(self):
         """meta.py 不存在时 GET 自动创建并返回空 vars。"""
@@ -443,7 +486,12 @@ class TestPomEndpoints(unittest.TestCase):
         self.assertTrue(hasattr(pom_pkg, "HomePage"))
         self.assertTrue(hasattr(pom_pkg, "VARS"))
         self.assertIsInstance(pom_pkg.LoginPage.ELEMENTS, dict)
-        self.assertEqual(pom_pkg.LoginPage.ELEMENTS["login_button"]["text"], "登录")
+        # 新格式：ELEMENTS 值是 Selector 实例，用 .for_platform('android') 拿 native kwargs
+        login_sel = pom_pkg.LoginPage.ELEMENTS["login_button"]
+        self.assertEqual(login_sel.for_platform("android"), {"text": "登录"})
+        # search 元素同理
+        search_sel = pom_pkg.HomePage.ELEMENTS["search"]
+        self.assertEqual(search_sel.for_platform("android"), {"resourceId": "x:id/s"})
         self.assertEqual(pom_pkg.VARS["package"], "com.x")
         self.assertEqual(pom_pkg.VARS["g"], 1)
 

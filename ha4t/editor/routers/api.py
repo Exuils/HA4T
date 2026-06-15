@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Optional, List
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
@@ -227,12 +227,85 @@ def _page_filename(page: str) -> str:
     return page + '.py'
 
 
-def _parse_pom_py(content: str) -> dict:
-    """解析 pom page / meta 文件 → {'meta': {...}, 'elements': {}, 'docs': {}, 'vars': {}}。
+def _coerce_legacy_dict_to_element(raw: dict) -> dict:
+    """老 dict 格式 → 新 ElementShape。
 
-    用 ast.literal_eval 抽顶层 ELEMENTS / VARS 字面量；用 tokenize 抽 ELEMENTS dict 内
-    每项 key 紧邻上方的连续 `#` 注释作为该元素的 doc（多行用 \n 合并）。语法错误时返回空 dict。
-    docs 与 elements 并列，不进 selector 字典——driver 不会拿到。
+    老格式：扁平 selector dict，例如 ``{"text": "登录", "_parent": "顶部"}`` 或
+    ``{"image": "x.png"}``。新格式按平台分桶 + 图像 + meta 三类拆开存储，让前端
+    UI 能按 platform tab 渲染、AI 读 POM 能看见结构化的"哪个平台采集了什么"。
+
+    迁移策略：扁平 dict 视为"老用户只测了一个平台"——所有非 _ 前缀、非 image
+    字段都塞进 android 分桶（兼容到目前 HA4T 主用 Android 的现状）。用户切到
+    iOS 后会看到 ios 分桶空、出现"未采集"标记，去采集即可。image 元素直接走
+    image 字段。
+    """
+    parent = raw.get('_parent') or ''
+    doc = raw.get('_doc') or ''
+    image = raw.get('image')
+    if image:
+        return {'platforms': {}, 'image': image, '_parent': parent, '_doc': doc}
+    bucket = {k: v for k, v in raw.items() if not k.startswith('_') and k != 'image'}
+    platforms = {'android': bucket} if bucket else {}
+    return {'platforms': platforms, 'image': None, '_parent': parent, '_doc': doc}
+
+
+def _ast_call_to_element(call_node: ast.Call) -> Optional[dict]:
+    """``Selector(...)`` AST 节点 → ElementShape；非 Selector 调用返回 None。
+
+    只信赖 `func.id == 'Selector'` 或 `func.attr == 'Selector'` —— round-trip
+    用户手工改了文件结构（如改成自定义工厂）我们不解析、当语法错误处理。
+    所有 kwargs 用 ast.literal_eval；平台分桶值必须是 dict 字面量。
+    """
+    func = call_node.func
+    name = None
+    if isinstance(func, ast.Name):
+        name = func.id
+    elif isinstance(func, ast.Attribute):
+        name = func.attr
+    if name != 'Selector':
+        return None
+
+    platforms: dict = {}
+    image: Optional[str] = None
+    parent = ''
+    doc = ''
+    for kw in call_node.keywords:
+        if kw.arg is None:
+            continue   # **expr 不处理
+        try:
+            val = ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError):
+            return None
+        if kw.arg in ('android', 'ios', 'harmony'):
+            if isinstance(val, dict):
+                platforms[kw.arg] = val
+        elif kw.arg == 'image':
+            if isinstance(val, str):
+                image = val
+        elif kw.arg == '_parent':
+            if isinstance(val, str):
+                parent = val
+        elif kw.arg == '_doc':
+            if isinstance(val, str):
+                doc = val
+        # 其它 `_xxx` meta 暂不处理（保留扩展位）
+    return {'platforms': platforms, 'image': image, '_parent': parent, '_doc': doc}
+
+
+def _parse_pom_py(content: str) -> dict:
+    """解析 pom page / meta 文件 → {meta, elements, docs, parents, vars}。
+
+    支持两种 ELEMENTS 元素表达：
+      1. ``"name": Selector(android={...}, ios={...}, image=..., _parent=..., _doc=...)``
+         新格式，平台分桶 + 跨平台 image + meta
+      2. ``"name": {"text": "..."}``  老扁平 dict 格式
+         自动按 ``_coerce_legacy_dict_to_element`` 升级（默认进 android 分桶）
+
+    elements 在响应里是新 ElementShape；docs / parents 仍并列单独返回（前端模型
+    最先是按 name → text/parent 字典化做的，保留这层 API 兼容直到下个迭代统一）。
+
+    用 tokenize 抽每条元素 key 上方紧邻的 `#` 注释作为 doc 兜底——如果 Selector
+    字面量里也写了 _doc，源码里那个优先。语法错误时返回空 dict。
     """
     meta = {'page': '', 'desc': '', 'triggers': ''}
     for line in content.split('\n'):
@@ -243,29 +316,51 @@ def _parse_pom_py(content: str) -> dict:
         elif line.startswith('# triggers:'):
             meta['triggers'] = line.split(':', 1)[1].strip()
 
-    elements, pvars, docs = {}, {}, {}
-    elements_keys_by_line: dict[int, str] = {}   # ELEMENTS dict 内每个 key 字符串 → 所在行号
+    elements: dict = {}
+    pvars: dict = {}
+    # ELEMENTS dict 里 key string → 行号，用于关联 `#` 注释作为 doc 兜底
+    elements_keys_by_line: dict[int, str] = {}
     try:
         tree = ast.parse(content)
-        for node in tree.body:
-            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                name = node.targets[0].id
+    except SyntaxError:
+        return {'meta': meta, 'elements': {}, 'docs': {}, 'parents': {}, 'vars': {}}
+
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            continue
+        target_name = node.targets[0].id
+        if target_name == 'VARS':
+            try:
+                pvars = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                pvars = {}
+            if not isinstance(pvars, dict):
+                pvars = {}
+            continue
+        if target_name != 'ELEMENTS' or not isinstance(node.value, ast.Dict):
+            continue
+        # 遍历 ELEMENTS 每个 entry：key 必须是 string literal，value 可能是
+        # Selector(...) Call 或 dict 字面量（向后兼容）
+        for key_node, value_node in zip(node.value.keys, node.value.values):
+            if not (isinstance(key_node, ast.Constant) and isinstance(key_node.value, str)):
+                continue
+            key_name = key_node.value
+            elements_keys_by_line[key_node.lineno] = key_name
+            element_shape: Optional[dict] = None
+            if isinstance(value_node, ast.Call):
+                element_shape = _ast_call_to_element(value_node)
+            if element_shape is None:
+                # 老 dict 字面量 → coerce
                 try:
-                    val = ast.literal_eval(node.value)
+                    raw = ast.literal_eval(value_node)
                 except (ValueError, SyntaxError):
                     continue
-                if name == 'ELEMENTS' and isinstance(val, dict) and isinstance(node.value, ast.Dict):
-                    elements = val
-                    # 拿每个 key node 的行号 —— literal_eval 后值已是 python 对象，但 node.value.keys 还在 AST 上
-                    for key_node in node.value.keys:
-                        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                            elements_keys_by_line[key_node.lineno] = key_node.value
-                elif name == 'VARS' and isinstance(val, dict):
-                    pvars = val
-    except SyntaxError:
-        pass
+                if isinstance(raw, dict):
+                    element_shape = _coerce_legacy_dict_to_element(raw)
+            if element_shape is not None:
+                elements[key_name] = element_shape
 
-    # 用 tokenize 收集所有注释行 lineno → 注释文本（去掉前导 # 与一个紧邻空格）
+    # tokenize 注释 — 给没在 Selector(_doc=) 里写 doc 但写了顶上 `# ...` 的元素兜底
     comments_by_line: dict[int, str] = {}
     try:
         import io, tokenize as _tok
@@ -280,62 +375,92 @@ def _parse_pom_py(content: str) -> dict:
     except (_tok.TokenError, IndentationError):
         pass
 
-    # 对 ELEMENTS dict 里每个 key：向上扫连续的 `#` 注释行（不能被代码行/空行截断），
-    # 倒序合并成 doc；跳过 ELEMENTS 模块级 meta（`# page:` 等）—— 它们行号在 ELEMENTS 之前。
     code_lines = content.split('\n')
     for key_line, key_name in elements_keys_by_line.items():
-        doc_parts: list[str] = []
+        # Selector 字面量里 _doc 优先；否则用 `#` 注释兜底
+        existing = elements.get(key_name, {}).get('_doc') or ''
+        if existing:
+            continue
+        doc_parts: list = []
         L = key_line - 1
         while L >= 1:
             if L in comments_by_line:
                 doc_parts.append(comments_by_line[L])
                 L -= 1
                 continue
-            # 整行只剩空白？空行截断，停止收集。
-            raw = code_lines[L - 1] if L - 1 < len(code_lines) else ''
-            if raw.strip() == '':
+            raw_line = code_lines[L - 1] if L - 1 < len(code_lines) else ''
+            if raw_line.strip() == '':
                 break
-            # 非注释、非空行 → 已抵达上一个元素 / 代码，停止。
             break
         if doc_parts:
             doc_parts.reverse()
-            docs[key_name] = '\n'.join(doc_parts).rstrip()
+            elements[key_name]['_doc'] = '\n'.join(doc_parts).rstrip()
 
-    # 拆出 `_parent` meta：UI 用来画树，driver 不该看到；同时把 `_parent` 从
-    # selector dict 里剥掉，让 elements 干净给前端展示（保存时由前端再塞回去）。
+    # 抽出独立的 docs / parents 字典（与 elements 并列返回；前端目前还在用）
+    docs: dict = {}
     parents: dict = {}
-    cleaned_elements: dict = {}
-    for k, v in elements.items():
-        if isinstance(v, dict) and '_parent' in v:
-            parent_name = v.get('_parent')
-            if isinstance(parent_name, str) and parent_name:
-                parents[k] = parent_name
-            cleaned_elements[k] = {kk: vv for kk, vv in v.items() if kk != '_parent'}
-        else:
-            cleaned_elements[k] = v
+    for k, el in elements.items():
+        if el.get('_doc'):
+            docs[k] = el['_doc']
+        if el.get('_parent'):
+            parents[k] = el['_parent']
 
-    return {'meta': meta, 'elements': cleaned_elements, 'docs': docs, 'parents': parents, 'vars': pvars}
+    return {'meta': meta, 'elements': elements, 'docs': docs, 'parents': parents, 'vars': pvars}
 
 
-def _render_pom_py(page: str, desc: str, triggers: str, elements: dict, docs: dict | None = None, parents: dict | None = None) -> str:
+def _render_selector_literal(el: dict) -> str:
+    """ElementShape → Python 源代码字面量 ``Selector(...)``。
+
+    输出字段顺序固定：``_parent`` → ``_doc`` → ``image`` → ``android`` → ``ios`` →
+    ``harmony``。同一 element 多次保存生成的字符串完全一致，git diff 稳定。
+    image 与 platforms 互斥规则在前端保证，这里只负责按 shape 写。
+    """
+    parts: list = []
+    parent = el.get('_parent') or ''
+    doc = el.get('_doc') or ''
+    image = el.get('image') or None
+    platforms = el.get('platforms') or {}
+    if parent:
+        parts.append(f'_parent={parent!r}')
+    if doc:
+        parts.append(f'_doc={doc!r}')
+    if image:
+        parts.append(f'image={image!r}')
+    for p in ('android', 'ios', 'harmony'):
+        bucket = platforms.get(p)
+        if bucket:
+            parts.append(f'{p}={bucket!r}')
+    return f'Selector({", ".join(parts)})'
+
+
+def _render_pom_py(
+    page: str, desc: str, triggers: str, elements: dict,
+    docs: Optional[dict] = None, parents: Optional[dict] = None,
+) -> str:
+    """渲染 ElementShape 集合 → ``pom/<page>.py`` 源码。
+
+    `docs` / `parents` 参数仍接受（前端旧调用未升级时单独传），会被合并到 elements
+    对应 ElementShape 的 `_doc` / `_parent` 字段，最终在 ``Selector(...)`` 字面量
+    里以 `_doc=` / `_parent=` 形式输出 —— 不再写顶上的 `#` 注释；这样 round-trip
+    走的是结构化字段，比注释更稳。
+    """
+    docs = docs or {}
+    parents = parents or {}
     lines = ['# -*- coding: utf-8 -*-', '# kind: pom', f'# page: {page}']
     if desc:
         lines.append(f'# desc: {desc}')
     if triggers:
         lines.append(f'# triggers: {triggers}')
-    lines += ['', 'ELEMENTS = {']
-    docs = docs or {}
-    parents = parents or {}
-    for k, v in elements.items():
-        doc = (docs.get(k) or '').strip()
-        if doc:
-            for dl in doc.split('\n'):
-                lines.append(f'    # {dl}'.rstrip())
-        # 父子关系：写入 selector dict 的 `_parent` 字段，driver 入口已剥 `_` 前缀
-        # 不会拿到。selector dict 浅 copy + 补字段，不污染调用方传入的对象。
+    lines += ['', 'from ha4t import Selector', '', 'ELEMENTS = {']
+    for k, raw in elements.items():
+        # 容忍前端传两种形态：新 ElementShape 或老扁平 dict 直接传 selector
+        el = raw if isinstance(raw, dict) and ('platforms' in raw or 'image' in raw or '_parent' in raw or '_doc' in raw) else _coerce_legacy_dict_to_element(raw if isinstance(raw, dict) else {})
+        # 合并独立 docs / parents 入参（前端旧路径还在用并列字典）
+        if k in docs and docs[k]:
+            el = {**el, '_doc': docs[k]}
         if k in parents and parents[k]:
-            v = dict(v); v['_parent'] = parents[k]
-        lines.append(f'    {k!r}: {v!r},')
+            el = {**el, '_parent': parents[k]}
+        lines.append(f'    {k!r}: {_render_selector_literal(el)},')
     lines += ['}', '']
     return '\n'.join(lines)
 
@@ -486,8 +611,10 @@ def _init_workspace(target: Path) -> dict:
         '\n'
         'dev = connect(platform="android", device_serial="")\n'
         'dev.start_app(VARS["package"])\n'
-        'dev.click(**登录页.ELEMENTS["登录按钮"])\n'
+        'dev.click(登录页.ELEMENTS["登录按钮"])   # 注意：传 Selector 对象，不带 **\n'
         '```\n'
+        '- ELEMENTS 值是 Selector 对象，自带跨平台分桶（android/ios/harmony） + image\n'
+        '- 直接 dev.click(ELEMENTS["x"])（不带 **），平台由 connect() 决定\n'
         '- 全局常量 → POM 编辑器「全局 VARS」（写入 `pom/_meta.py`，代码 `VARS["key"]`）\n'
         '- 用例常量 → 顶层 `LOCAL_VARS = {...}`（代码 `LOCAL_VARS["key"]`）\n'
         '\n'
@@ -787,17 +914,29 @@ class PomVerifySelectorRequest(BaseModel):
 def pom_verify_selector(req: PomVerifySelectorRequest):
     """对单个 POM selector 调底层 driver 实际查找，返回命中区域。
 
-    验证结果不落盘 — 纯实时查询。image 元素需在设备上手工验证，直接报错。
+    req.selector 兼容两种 shape：
+      - ElementShape `{platforms: {<plat>: {...}}, image, _parent, _doc}`：取 platforms[req.platform]
+      - 老扁平 dict `{text:..., resourceId:...}`：直接当当前平台 native kwargs
+    image 元素需在设备上手工验证，直接报错。
     """
     if not req.selector:
         return ApiResponse.doError("selector 不能为空")
-    if 'image' in req.selector:
-        return ApiResponse.doError("image 元素需在设备上手工验证")
+    raw = dict(req.selector)
+    # ElementShape：抽出当前平台的 bucket，image 直接报错
+    if 'platforms' in raw or 'image' in raw:
+        if raw.get('image'):
+            return ApiResponse.doError("image 元素需在设备上手工验证")
+        bucket = (raw.get('platforms') or {}).get(req.platform) or {}
+        if not bucket:
+            return ApiResponse.doError(f"该元素在 {req.platform} 平台未采集")
+        sel = {k: v for k, v in bucket.items() if not k.startswith('_')}
+    else:
+        if 'image' in raw:
+            return ApiResponse.doError("image 元素需在设备上手工验证")
+        sel = {k: v for k, v in raw.items() if not k.startswith('_')}
     device = cached_devices.get((req.platform, req.serial))
     if device is None:
         return ApiResponse.doError("设备未连接")
-    # 剥 `_` 前缀 meta（_doc / _parent 等）—— 给 driver 的 selector 必须纯净。
-    sel = {k: v for k, v in req.selector.items() if not k.startswith('_')}
     try:
         rect = device.find_element_rect(sel)
     except Exception as e:
