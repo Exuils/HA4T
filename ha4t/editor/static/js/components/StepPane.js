@@ -261,7 +261,12 @@ const TEMPLATE = `
         </el-popconfirm>
         <el-button v-if="!verify.verifyMode.value" size="small" type="primary"
             :disabled="!pom.currentFile.value" @click="verify.beginVerify">验证</el-button>
-        <el-button v-else size="small" type="success" @click="verify.endVerify">完成验证</el-button>
+        <template v-else>
+          <el-tooltip content="把「未找到」的元素再扫一遍 — 已通过 / 手工 / 不支持的不动" placement="top">
+            <el-button size="small" @click="verify.rescanFailures"><el-icon><RefreshRight /></el-icon> 重扫失败</el-button>
+          </el-tooltip>
+          <el-button size="small" type="success" @click="verify.endVerify">完成验证</el-button>
+        </template>
         <el-button size="small" :disabled="!pom.currentFile.value" @click="openPomSource"
             title="查看 pom/&lt;page&gt;.py 源码（只读）">
           <el-icon><Reading /></el-icon>
