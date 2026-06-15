@@ -37,7 +37,8 @@ const TEMPLATE = `
     <div v-for="r in reports" :key="r.name" class="allure-card"
         :class="{ 'allure-card-pass': stateOf(r) === 'pass', 'allure-card-fail': stateOf(r) === 'fail' }">
       <div class="allure-card-head">
-        <span class="allure-card-name">{{ r.name }}</span>
+        <span class="allure-card-name">{{ caseNameOf(r.name) }}</span>
+        <span class="allure-card-run" v-if="runTagOf(r.name)">#{{ runTagOf(r.name) }}</span>
         <span class="allure-card-time">{{ fmtTs(r.mtime) }}</span>
       </div>
       <div class="allure-card-summary" v-if="r.summary && r.summary.total">
@@ -126,6 +127,18 @@ export default {
 
     onMounted(refresh);
 
-    return { reports, loading, error, refresh, stateOf, openReport, copyUrl, onDelete, fmtTs: _fmtTs };
+    // name 形如 "<case>_YYYYMMDD-HHMMSS" —— 切掉时间戳后缀显示纯用例名，时间戳单独显示
+    function caseNameOf(name) {
+      return (name || '').replace(/_\d{8}-\d{6}$/, '');
+    }
+    function runTagOf(name) {
+      const m = (name || '').match(/_(\d{8}-\d{6})$/);
+      return m ? m[1] : '';
+    }
+
+    return {
+      reports, loading, error, refresh, stateOf, openReport, copyUrl, onDelete,
+      fmtTs: _fmtTs, caseNameOf, runTagOf,
+    };
   },
 };

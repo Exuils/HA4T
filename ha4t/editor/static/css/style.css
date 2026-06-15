@@ -886,3 +886,14 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 .allure-card-actions {
   display: flex; gap: 6px;
 }
+
+/* 报告卡片：时间戳后缀作 monospace 小标签 */
+.allure-card-run {
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  color: var(--fg-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bd);
+  margin-left: 4px;
+}
