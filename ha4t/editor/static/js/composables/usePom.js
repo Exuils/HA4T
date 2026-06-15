@@ -4,6 +4,7 @@ import {
   getImage, saveImage,
 } from '../api.js';
 import { selectorFromNode } from './useTask.js';
+import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 
 const { ref } = Vue;
 
@@ -14,7 +15,7 @@ export function usePom() {
   // Page index (lightweight — desc/triggers/element_count only)
   const pages              = ref([]);
   // Currently selected page
-  const currentFile        = ref('');
+  const currentFile        = ref(getFromLocalStorage('currentPomFile', ''));
   const page               = ref('');
   const desc               = ref('');
   const triggers           = ref('');
@@ -44,24 +45,33 @@ export function usePom() {
     } catch (e) { /* tolerate transient errors */ }
   }
 
+  // 清掉所有 page 级状态——失败 / 显式取消选择时都用，避免残留误导。
+  function _clearPageState() {
+    currentFile.value = '';
+    page.value = ''; desc.value = ''; triggers.value = '';
+    elements.value = {};
+    elementDocs.value = {};
+    imageCache.value = {};
+    saveToLocalStorage('currentPomFile', '');
+  }
+
   async function selectPage(filename, msg) {
-    if (!filename) {
-      currentFile.value = '';
-      page.value = ''; desc.value = ''; triggers.value = '';
-      elements.value = {};
-      elementDocs.value = {};
-      imageCache.value = {};
-      return;
-    }
+    if (!filename) { _clearPageState(); return; }
     try {
       const res = await pomGetPage(filename);
-      if (!res.success) { _msgError(msg, res.message || '加载页面失败'); return; }
+      if (!res.success) {
+        // 文件不存在 / 损坏 / 后端报错 —— 清残留 + 提示，避免下次刷新仍然卡在这个文件
+        _msgError(msg, `加载页面失败: ${res.message || filename}`);
+        _clearPageState();
+        return;
+      }
       currentFile.value = res.data.filename;
       page.value     = res.data.page || '';
       desc.value     = res.data.desc || '';
       triggers.value = res.data.triggers || '';
       elements.value = res.data.elements || {};
       elementDocs.value = res.data.docs || {};
+      saveToLocalStorage('currentPomFile', res.data.filename);
       // 拉取页面里所有 image 元素的缩略图 — fire-and-forget per file，单张失败不阻塞
       const wanted = new Set();
       for (const sel of Object.values(elements.value)) {
@@ -77,7 +87,10 @@ export function usePom() {
         } catch (e) { /* 单图失败留空，UI 显示占位 */ }
       }));
       imageCache.value = nextCache;
-    } catch (e) { _msgError(msg, '加载页面错误: ' + e.message); }
+    } catch (e) {
+      _msgError(msg, '加载页面错误: ' + (e.message || e));
+      _clearPageState();
+    }
   }
 
   async function createPage(pageName, descText, msg) {

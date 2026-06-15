@@ -13,8 +13,10 @@ export function useDevice() {
   const isDumping    = ref(false);
   const wdaUrl       = ref(getFromLocalStorage('wdaUrl', ''));
   const snapshotMaxDepth = ref(getFromLocalStorage('snapshotMaxDepth', 30));
-  const displaySize  = ref(getFromLocalStorage('displaySize', [0, 0]));
-  const scale        = ref(getFromLocalStorage('scale', 1));
+  // displaySize / scale 是设备运行时元数据，每次 dump hierarchy 都会被刷新 ——
+  // 不持久化，避免重启后看到的是上次设备的尺寸残留误导。
+  const displaySize  = ref([0, 0]);
+  const scale        = ref(1);
   const screenshotTransform = reactive({ scale: 1, offsetX: 0, offsetY: 0 });
   const jsonHierarchy = ref({});
   const treeData     = ref([]);

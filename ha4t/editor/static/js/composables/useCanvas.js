@@ -1,11 +1,10 @@
-import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 import { fetchScreenshot, fetchHierarchy, saveImage } from '../api.js';
 
 // useCanvas — encapsulates screenshot rendering, hierarchy overlay, hover/click
 // pipelines, capture-rectangle / swipe recording, and the dump-hierarchy flow.
 //
 // Signature: useCanvas({ device, task, runner, msg })
-// Returns: { initCanvas, loadCachedScreenshot, screenshotAndDumpHierarchy }
+// Returns: { initCanvas, screenshotAndDumpHierarchy }
 //
 // Cross-component bridges (kept for backward compat):
 //   window._screenshotAndDump     ← called by App.js, StepPane.js
@@ -117,12 +116,18 @@ export function useCanvas({ device, task, runner, msg, pom }) {
     }
     // ── verify mode overlay（POM 元素定位结果，App.js watch 同步到全局） ──
     // 仅画方框 + 元素名 tag，不填充元素 —— 填充会盖住截图内容，验证多元素时一片绿。
+    // hover 在 POM 列表某行时（window._pomVerifyHover 为该 name），只画那一条；
+    // 否则画全部 found 元素。这样多元素验证完后可以 hover 单独看每个的位置。
     if (window._pomVerifyResults) {
       const results = window._pomVerifyResults;
+      const hovered = window._pomVerifyHover || '';
       ctx.setLineDash([]);
       ctx.font = '11px Consolas, monospace';
       ctx.textBaseline = 'top';
-      for (const name of Object.keys(results)) {
+      const namesToDraw = hovered
+        ? (results[hovered] && results[hovered].status === 'found' ? [hovered] : [])
+        : Object.keys(results);
+      for (const name of namesToDraw) {
         const r = results[name];
         if (r.status !== 'found' || !r.rect) continue;
         const x = r.rect.x * scale + offsetX;
@@ -204,7 +209,6 @@ export function useCanvas({ device, task, runner, msg, pom }) {
           return tnode;
         };
         device.treeData.value = rootNode ? [buildTree(rootNode)] : [];
-        if (ssRes.success) saveToLocalStorage('cachedScreenshot', ssRes.data);
       }
     } finally { device.isDumping.value = false; }
   }
@@ -401,14 +405,9 @@ export function useCanvas({ device, task, runner, msg, pom }) {
     }
   }
 
-  function loadCachedScreenshot() {
-    const cached = getFromLocalStorage('cachedScreenshot', null);
-    if (cached) renderScreenshot(cached);
-  }
 
   return {
     initCanvas,
-    loadCachedScreenshot,
     screenshotAndDumpHierarchy,
   };
 }

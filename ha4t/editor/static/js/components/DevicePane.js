@@ -73,7 +73,8 @@ export default {
   },
 
   mounted() {
+    // 不再用 localStorage 缓存截图 —— 连接成功后由 App.js onMounted 触发实时 dump，
+    // 显示真实当前界面，避免显示过时画面。
     this.canvas.initCanvas();
-    this.canvas.loadCachedScreenshot();
   },
 };

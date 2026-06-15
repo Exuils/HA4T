@@ -1,5 +1,6 @@
 import { reorderTask } from '../api.js';
 import { fileNameFromName } from '../composables/useTask.js';
+import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 import KvRow from './KvRow.js';
 import CodeViewer from './CodeViewer.js';
 
@@ -262,7 +263,7 @@ const TEMPLATE = `
         <el-button v-if="!verify.verifyMode.value" size="small" type="primary"
             :disabled="!pom.currentFile.value" @click="verify.beginVerify">验证</el-button>
         <template v-else>
-          <el-tooltip content="重扫未找到的元素 — 已通过的永远保留，直到点「完成验证」清空" placement="top">
+          <el-tooltip content="重新截图 + 重扫未找到的元素 — 已通过的永远保留，直到点「完成验证」清空" placement="top">
             <el-button size="small" @click="verify.rescanPending"><el-icon><RefreshRight /></el-icon> 刷新未找到</el-button>
           </el-tooltip>
           <el-button size="small" type="success" @click="verify.endVerify">完成验证</el-button>
@@ -312,7 +313,9 @@ const TEMPLATE = `
         </template>
         <template v-else>
           <div v-for="(sel, name) in pom.elements.value" :key="name"
-              :class="['pom-el-card', statusClass(name)]">
+              :class="['pom-el-card', statusClass(name)]"
+              @mouseenter="onPomRowHover(name)"
+              @mouseleave="onPomRowHover('')">
             <div class="pom-el-row" v-if="editingElementName !== name">
               <template v-if="sel && sel.image">
                 <img v-if="pom.imageCache.value[sel.image]"
@@ -509,8 +512,21 @@ export default {
     const pom    = inject('pom');
     const verify = inject('verify');
 
-    // 顶层 tab：'caseEdit'（默认）| 'pom'。
-    const outerTab = ref('caseEdit');
+    // 顶层 tab：'caseEdit'（默认）| 'pom'。从 localStorage 恢复，刷新页面回到上次位置。
+    const outerTab = ref(getFromLocalStorage('outerTab', 'caseEdit'));
+    watch(outerTab, (v) => saveToLocalStorage('outerTab', v));
+
+    // 启动时若停留在 POM tab：拉 page 列表 + 元数据 + 上次选中的 page（usePom
+    // 内 currentFile 已经从 localStorage 读出来了，这里只是触发实时加载验证文件
+    // 还存在并拿最新内容；文件没了的话 selectPage 内部会清状态并报错提示）。
+    if (outerTab.value === 'pom') {
+      pom.loadPages();
+      pom.loadMeta();
+      if (pom.currentFile.value) {
+        pom.selectPage(pom.currentFile.value, msg);
+      }
+      pom.captureMode.value = true;
+    }
 
     // 切到 POM tab：刷新数据 + 自动开启采集；离开/验证中按互斥规则控制采集开关
     function onSwitchPom() {
@@ -833,6 +849,16 @@ export default {
       codeViewerVisible.value = true;
     }
 
+    // POM 元素行 hover：验证模式下 canvas overlay 只画 hover 的那一条 found 元素，
+    // 其它隐藏；非验证模式或目标元素不是 found（待扫 / 未找到 / image / 平台不支持）
+    // 直接清掉 hover —— 不画即可。
+    function onPomRowHover(name) {
+      if (!verify.verifyMode.value) return;
+      const r = name ? verify.results.value[name] : null;
+      window._pomVerifyHover = (r && r.status === 'found') ? name : '';
+      if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+    }
+
     const newPageDialogVisible = ref(false);
     const newPageName = ref('');
     const newPageDesc = ref('');
@@ -947,6 +973,7 @@ export default {
       onSelectPage, onDeletePage,
       newPageDialogVisible, newPageName, newPageDesc, onCreatePage,
       codeViewerVisible, codeViewerPath, openCaseSource, openPomSource,
+      onPomRowHover,
       totalSelectorElements, statusOf, statusClass, countByStatus,
       // local vars (case-level)
       localVarsOpen, globalVarsOpen,

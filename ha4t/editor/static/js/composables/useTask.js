@@ -345,33 +345,40 @@ export function useTask() {
   }
 
   async function loadYamlFile(filename, msg) {
-    if (!filename) { clearTask(); return; }
+    if (!filename) { clearTask(); saveToLocalStorage('currentYamlFile', ''); return; }
     try {
       const res = await getTask(filename);
-      if (res.success) {
-        currentYamlFile.value = filename;
-        currentYamlContent.value = res.data.content;
-        parseYamlToTask(res.data.content);
-        if (!projectId.value) {
-          projectId.value = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-        }
-        // load images for imglocate steps
-        for (let i = 0; i < steps.value.length; i++) {
-          const step = steps.value[i];
-          if (step._type === 'imglocate' && step.image_filename) {
-            try {
-              const imgRes = await getImage(step.image_filename);
-              if (imgRes.success && imgRes.data && imgRes.data.data) {
-                steps.value[i] = { ...step, image: 'data:image/png;base64,' + imgRes.data.data };
-              }
-            } catch (e) { console.warn('图片加载失败:', step.image_filename); }
-          }
-        }
-        saveToLocalStorage('currentYamlFile', filename);
-        if (msg) msg.info(`已加载: ${filename}`);
+      if (!res.success) {
+        // 文件不存在 / 后端报错 —— 清残留 + localStorage 脏键，避免下次刷新仍卡死
+        if (msg) msg.error(`加载用例失败: ${res.message || filename}`);
+        clearTask();
+        saveToLocalStorage('currentYamlFile', '');
+        return;
       }
+      currentYamlFile.value = filename;
+      currentYamlContent.value = res.data.content;
+      parseYamlToTask(res.data.content);
+      if (!projectId.value) {
+        projectId.value = 'proj_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+      }
+      // load images for imglocate steps
+      for (let i = 0; i < steps.value.length; i++) {
+        const step = steps.value[i];
+        if (step._type === 'imglocate' && step.image_filename) {
+          try {
+            const imgRes = await getImage(step.image_filename);
+            if (imgRes.success && imgRes.data && imgRes.data.data) {
+              steps.value[i] = { ...step, image: 'data:image/png;base64,' + imgRes.data.data };
+            }
+          } catch (e) { console.warn('图片加载失败:', step.image_filename); }
+        }
+      }
+      saveToLocalStorage('currentYamlFile', filename);
+      if (msg) msg.info(`已加载: ${filename}`);
     } catch (e) {
-      if (msg) msg.error(`错误: ${e.message}`);
+      if (msg) msg.error(`加载用例错误: ${e.message || e}`);
+      clearTask();
+      saveToLocalStorage('currentYamlFile', '');
     }
   }
 

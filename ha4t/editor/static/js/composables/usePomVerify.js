@@ -73,18 +73,22 @@ export function usePomVerify({ pom, device, msg }) {
     }
   }
 
-  function beginVerify() {
+  async function beginVerify() {
     if (!pom.currentFile.value) { msg.warn('请先选择 Page'); return; }
     if (!device.isConnected.value) { msg.warn('设备未连接'); return; }
     pom.captureMode.value = false;          // 采集 / 验证互斥
     verifyMode.value = true;
     results.value = {};                      // 进入验证时清一次，进入后只增不减
+    // 第一轮先取一次最新截图 + hierarchy，再扫所有元素
+    try {
+      if (window._screenshotAndDump) await window._screenshotAndDump();
+    } catch (e) { /* 容忍：driver 内部会重试 */ }
     _scan(Object.keys(pom.elements.value));
   }
 
   // 重扫所有「尚未 found」的元素（not_found / pending / undefined）。
   // 在验证过程中用户点工具栏「刷新」反复调用，已 found 的永远不动。
-  function rescanPending() {
+  async function rescanPending() {
     if (!verifyMode.value) { msg.warn('未进入验证模式'); return; }
     const all = Object.keys(pom.elements.value);
     const targets = all.filter(n => {
@@ -95,16 +99,21 @@ export function usePomVerify({ pom, device, msg }) {
       msg.success && msg.success('全部已通过');
       return;
     }
+    // 先重新截图 + dump hierarchy —— driver 端拿到当前界面才能准确定位；
+    // 否则后端用上次的 hierarchy 查，看起来"刷新没用"。失败不阻塞扫描。
+    try {
+      if (window._screenshotAndDump) await window._screenshotAndDump();
+    } catch (e) { /* 截图失败也继续 _scan —— driver 内部还会重试 */ }
+    msg.info && msg.info(`重扫 ${targets.length} 个元素…`);
     _scan(targets);
   }
 
-  // 兼容旧外部钩子名（早期代码里有人调）。
-  async function _scanOnce() { return rescanPending(); }
 
   function endVerify() {
     verifyMode.value = false;
     _scanGen++;          // 作废在飞扫描
     results.value = {};
+    window._pomVerifyHover = '';
   }
 
   // 元素改名 / 改 selector / 删除时的回调：扫一次该元素，不动其它项。
