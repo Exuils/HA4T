@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 __version__ = "0.1.6"
-__all__ = ["__version__", "Device", "connect", "include"]
+__all__ = ["__version__", "Device", "connect", "include", "Selector", "SelectorNotAvailableError"]
 
 import os
 import time
@@ -12,8 +12,8 @@ import numpy as np
 from ha4t.config import DeviceConfig, global_config
 from ha4t.drivers import DRIVERS
 from ha4t.exceptions import DeviceConnectionError
+from ha4t.selector import Selector, SelectorNotAvailableError, to_native
 from ha4t.utils.log_utils import log_out, cost_time
-
 
 # ── OCR 懒加载 ────────────────────────────────────────────────────────────────
 
@@ -37,6 +37,42 @@ class Device:
         self.driver = driver
         self.config: DeviceConfig = config or DeviceConfig()
         self.device_info: str = ""
+
+    @property
+    def platform(self) -> str:
+        """当前连接的平台名（android / ios / harmony）。"""
+        return (self.config.platform or "").lower()
+
+    # ── Selector 解析：跨平台元素入口 ─────────────────────────────────────────
+    def _resolve_selector(self, args, kwargs):
+        """所有元素操作入口（click/wait/exists/...）的预处理。
+
+        归一化两条路径：
+          (1) `dev.click(SelectorObj, ...)` —— 第一个位置参数是 Selector 实例 →
+              `for_platform(self.platform)` 解出 native kwargs，**合并进 kwargs**，
+              并把 Selector 从 args 弹出。
+          (2) `dev.click(text="登录")` —— 走 canonical 映射，按当前平台翻译成 native
+              kwargs。已经是 native 字段的也会保守透传不动。
+
+        坐标 tuple、字符串 OCR 文字、Template 等其它 args[0] 形态原样保留 ——
+        Selector 解析只针对 Selector 实例触发。
+
+        SelectorNotAvailableError 由 for_platform 抛，cost_time 装饰器会包成可读
+        错误信息（包含函数名）。
+        """
+        if args and isinstance(args[0], Selector):
+            sel = args[0]
+            native = sel.for_platform(self.platform)
+            # Selector 提供的字段不该被 caller 的 kwargs 覆盖（caller 显式传了 Selector
+            # 就是想用元素 selector）；caller 的 kwargs 里 timeout / threshold 等动作参数仍保留
+            merged = {**kwargs, **native}
+            return args[1:], merged
+        # 路径 (2)：raw kwargs 走 canonical → native 映射
+        # 排除动作参数（timeout / threshold / interval / duration / dx / dy / rgb / ...）—— 这些
+        # 不是 selector 字段，映射函数不动它们就行（to_* 透传未知字段）
+        if kwargs and self.platform:
+            kwargs = to_native(kwargs, self.platform)
+        return args, kwargs
 
     # ── 截图 ──────────────────────────────────────────────────────────────────
 
@@ -89,12 +125,14 @@ class Device:
         """
         点击操作，支持多种定位方式：
 
-        - click((x, y))             # 绝对或比例坐标
-        - click("文字")              # OCR 定位
-        - click(Template(...))      # 图像匹配
-        - click(text="xxx")         # u2/wda 原生属性
-        - click(image="img.png")    # 图像路径
+        - click(SelectorObj)         # 跨平台 Selector 对象（推荐 — POM 写法）
+        - click((x, y))              # 绝对或比例坐标
+        - click("文字")               # OCR 定位
+        - click(Template(...))       # 图像匹配
+        - click(text="xxx")          # canonical kwargs → 当前平台自动翻译
+        - click(image="img.png")     # 图像路径
         """
+        args, kwargs = self._resolve_selector(args, kwargs)
         if args:
             arg0 = args[0]
             if isinstance(arg0, tuple):
@@ -212,8 +250,9 @@ class Device:
 
     @cost_time
     def drag(self, *args, dx: int = 0, dy: int = 0, duration: float = 0.5, **kwargs) -> None:
-        """拖拽元素（偏移 dx/dy 像素）。"""
-        if not kwargs:
+        """拖拽元素（偏移 dx/dy 像素）。支持 Selector 对象 / canonical kwargs。"""
+        args, kwargs = self._resolve_selector(args, kwargs)
+        if not args and not kwargs:
             raise ValueError("drag() 需要元素定位参数")
         center = self._get_element_center(**kwargs)
         self.driver.swipe(center[0], center[1],
@@ -233,6 +272,7 @@ class Device:
     # ── 存在 / 等待 ───────────────────────────────────────────────────────────
 
     def _exists(self, *args, **kwargs) -> bool:
+        args, kwargs = self._resolve_selector(args, kwargs)
         if args:
             arg0 = args[0]
             if isinstance(arg0, tuple):
@@ -283,7 +323,8 @@ class Device:
     def wait(self, *args, timeout: Optional[float] = None,
              reverse: bool = False, raise_error: bool = True,
              use_in_text: bool = False, **kwargs):
-        """等待元素出现/消失。timeout 默认读取 global_config.find_timeout。"""
+        """等待元素出现/消失。timeout 默认读取 global_config.find_timeout。支持 Selector 对象 / canonical kwargs。"""
+        args, kwargs = self._resolve_selector(args, kwargs)
         _timeout = timeout if timeout is not None else global_config.find_timeout
         start = time.time()
         if use_in_text and args and isinstance(args[0], str):
@@ -319,7 +360,8 @@ class Device:
 
     @cost_time
     def get_text(self, *args, **kwargs) -> str:
-        """获取元素的文本内容。"""
+        """获取元素的文本内容。支持 Selector 对象 / canonical kwargs。"""
+        args, kwargs = self._resolve_selector(args, kwargs)
         if kwargs:
             try:
                 el = self.driver.find(**kwargs)
@@ -335,7 +377,8 @@ class Device:
     @cost_time
     def assert_element(self, *args, operator: str = 'eq', expected=None,
                        extract: str = 'text', raise_error: bool = True, **kwargs) -> bool:
-        """元素断言，支持 eq/ne/contains/not_contains/empty/not_empty/regex/exists。"""
+        """元素断言，支持 eq/ne/contains/not_contains/empty/not_empty/regex/exists。支持 Selector 对象。"""
+        args, kwargs = self._resolve_selector(args, kwargs)
         import re
         if extract == 'exists':
             exists_result = self._exists(*args, **kwargs)
