@@ -1,5 +1,5 @@
 import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
-import { listTasks, getTask, saveTask, saveImage, getImage, listPackages, cleanupImages, runAllure } from '../api.js';
+import { listTasks, getTask, saveTask, saveImage, getImage, listPackages, cleanupImages, runAllure, pomListPages, pomGetPage } from '../api.js';
 
 const { ref } = Vue;
 
@@ -7,6 +7,7 @@ const { ref } = Vue;
 
 const SLASH_STEP = [
   { action: 'element',   desc: '元素操作 (点击/长按/断言)' },
+  { action: 'pom',       desc: '复用 POM 元素 (从已采集元素中选)' },
   { action: 'swipe',     desc: '录制滑动手势 (比例坐标)' },
   { action: 'key',       desc: '系统按键' },
   { action: 'launchapp', desc: '启动应用' },
@@ -128,6 +129,22 @@ function parseStepCode(code) {
     s._includedSteps = null;    // lazy-loaded on first expand
     return s;
   }
+  // POM 引用：dev.<action>(<page>.ELEMENTS["<name>"])
+  // page 名允许中文 / 字母数字下划线；name 在 [] 里支持双引号或单引号；不消费 kwargs
+  // —— 任何 dev.click(ELEMENTS["x"], timeout=5) 的额外动作参数都被允许。
+  const pomRefRegex = /^(?:dev\.)?(click|double_click|long_press|wait|exists|get_text|assert_element)\(\s*([\w\u4e00-\u9fa5]+)\.ELEMENTS\[\s*["']([^"']+)["']\s*\]\s*(?:,\s*([^)]*))?\)$/;
+  const pomMatch = code.match(pomRefRegex);
+  if (pomMatch) {
+    const action = pomMatch[1];
+    const page = pomMatch[2];
+    const name = pomMatch[3];
+    const extraStr = (pomMatch[4] || '').trim();
+    s._type = 'pom_ref';
+    s._pomRef = { page, name, action };
+    if (extraStr) s._pomRef.extra = extraStr;
+    s._open = false;
+    return s;
+  }
   const elMatch = code.match(/^(?:dev\.)?(click|double_click|long_press|drag|assert_element)\((.*)\)$/);
   if (elMatch) {
     const func = elMatch[1];
@@ -196,6 +213,42 @@ export function useTask() {
   const settingsVisible   = ref(false);
   const autoRun           = ref(getFromLocalStorage('autoRun', false));
   const appsCache         = ref([]);
+  // POM 元素全量缓存（slash /pom + 步骤属性"复用 POM"模式共享）
+  // 平铺成 [{ page, name, doc, hasImage, _parent, platforms }] —— 不存完整 Selector
+  // 数据，仅给 UI 列表展示 / 过滤；真正插入用例时按 page+name 写 ELEMENTS 引用。
+  const pomElementsCache  = ref([]);
+
+  /** 拉所有 page 的元素清单 → pomElementsCache。
+   *  - 已有缓存且 force=false 时秒返回，避免每次打开 slash 都串行 N 个请求
+   *  - 任一 page 拉失败不阻断，单独打 warn
+   */
+  async function loadAllPomElements(force = false) {
+    if (pomElementsCache.value.length && !force) return;
+    try {
+      const lp = await pomListPages();
+      if (!lp.success) return;
+      const pages = lp.data || [];
+      const out = [];
+      for (const p of pages) {
+        try {
+          const r = await pomGetPage(p.filename);
+          if (!r.success) continue;
+          const els = r.data.elements || {};
+          for (const [name, el] of Object.entries(els)) {
+            out.push({
+              page: r.data.page,
+              name,
+              doc: el._doc || '',
+              hasImage: !!el.image,
+              _parent: el._parent || '',
+              platforms: Object.keys(el.platforms || {}),
+            });
+          }
+        } catch (e) { console.warn('loadAllPomElements: skip', p.filename, e); }
+      }
+      pomElementsCache.value = out;
+    } catch (e) { console.warn('loadAllPomElements failed:', e); }
+  }
 
   // computed-like helper (used where computed not applicable)
   function getSelectedStep() {
@@ -275,6 +328,20 @@ export function useTask() {
     localVars.value = lv ? lv.vars : {};
   }
 
+  /** 扫 steps 收集所有 POM page 引用，返回去重后的 page 名列表（按首次出现顺序）。
+   *  序列化用例时按此 emit `from pom import <pages> ...` 一行，避免运行时 ImportError。
+   *  没有任何 pom 引用步骤 → 返回空数组，不写 import。
+   */
+  function _collectPomImports(stepsList) {
+    const out = [];
+    const seen = new Set();
+    for (const s of (stepsList || [])) {
+      const page = s && s._type === 'pom_ref' && s._pomRef && s._pomRef.page;
+      if (page && !seen.has(page)) { seen.add(page); out.push(page); }
+    }
+    return out;
+  }
+
   function taskToYaml(serial) {
     let y = `# name: ${taskName.value || '未命名'}\n`;
     if (taskDesc.value) y += `# desc: ${taskDesc.value}\n`;
@@ -287,6 +354,8 @@ export function useTask() {
     if (taskRerun.value) y += `# rerun: ${taskRerun.value}\n`;
     y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
     y += 'from ha4t import connect, include\nfrom time import sleep\n';
+    const pomPages = _collectPomImports(steps.value);
+    if (pomPages.length) y += `from pom import ${pomPages.join(', ')}\n`;
     y += `dev = connect(platform="${taskPlatform.value}", device_serial="${serial || ''}")\n\n`;
     const lvBlock = _serializeLocalVars(localVars.value);
     if (lvBlock) y += lvBlock + '\n';
@@ -300,8 +369,10 @@ export function useTask() {
 
   function taskToYamlSingle(i, serial) {
     let y = `# name: ${taskName.value}\n# platform: ${taskPlatform.value}\n`;
-    y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
     y += 'from ha4t import connect, include\nfrom time import sleep\n';
+    const stepsHere = [steps.value[i]];
+    const pomPages = _collectPomImports(stepsHere);
+    if (pomPages.length) y += `from pom import ${pomPages.join(', ')}\n`;
     y += `dev = connect(platform="${taskPlatform.value}", device_serial="${serial || ''}")\n\n`;
     y += '# --step--\n' + steps.value[i].code + '\n';
     return y;
@@ -309,8 +380,9 @@ export function useTask() {
 
   function taskToYamlFrom(i, serial) {
     let y = `# name: ${taskName.value}\n# platform: ${taskPlatform.value}\n`;
-    y += 'import os\nos.environ["FLAGS_use_mkldnn"] = "0"\n';
     y += 'from ha4t import connect, include\nfrom time import sleep\n';
+    const pomPages = _collectPomImports(steps.value.slice(i));
+    if (pomPages.length) y += `from pom import ${pomPages.join(', ')}\n`;
     y += `dev = connect(platform="${taskPlatform.value}", device_serial="${serial || ''}")\n\n`;
     steps.value.slice(i).forEach(s => {
       const sep = s.remark ? `# --step-- ${s.remark}` : '# --step--';
@@ -505,6 +577,7 @@ export function useTask() {
     if (!step) return null;
     const c = step.code;
     if (step._type === 'include') return 'include';
+    if (step._type === 'pom_ref') return 'pom_ref';
     if (step.stepType === 'element') return 'element';
     if (step._type === 'imglocate') return 'imglocate';
     if (/^(dev\.)?swipe\(/.test(c)) return 'swipe';
@@ -523,6 +596,16 @@ export function useTask() {
     switch (config.type) {
       case 'element':  config.fields = { stepType:'element', elementAction: step.elementAction||'click', selector: step.selector||{}, elementParams: step.elementParams||{} }; break;
       case 'imglocate':config.fields = { action:step.action||'click', grid_h:step.grid_h||1, grid_v:step.grid_v||1, click_col:step.click_col||0, click_row:step.click_row||0, timeout:step.timeout||10, threshold:step.threshold??'', image:step.image||null }; break;
+      case 'pom_ref': {
+        const ref = step._pomRef || {};
+        config.fields = {
+          page: ref.page || '',
+          name: ref.name || '',
+          action: ref.action || 'click',
+          extra: ref.extra || '',
+        };
+        break;
+      }
       case 'swipe': { const m = c.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/); config.fields = m ? { x1:+m[1], y1:+m[2], x2:+m[3], y2:+m[4] } : { _raw:c }; break; }
       case 'tap': { const m = c.match(/^(?:dev\.)?click\((.*)\)$/); config.fields = { selector: m ? m[1] : '' }; break; }
       case 'key': { const m = c.match(/(?:press|key)\("([^"]*)"\)/); config.fields = { key: m ? m[1] : '' }; break; }
@@ -541,6 +624,7 @@ export function useTask() {
     if (field === 'code')   { step.code = value; _dirtyStep(stepIndex, serial); return; }
     if (type === 'element') { _updateElementField(stepIndex, field, value, serial); return; }
     if (type === 'imglocate') { _updateImgField(stepIndex, field, value, serial); return; }
+    if (type === 'pom_ref') { _updatePomRefField(stepIndex, field, value, serial); return; }
     switch (type) {
       case 'swipe': { const m = step.code.match(/swipe\(\(([\d.]+),\s*([\d.]+)\)\s*,\s*\(([\d.]+),\s*([\d.]+)\)\)/); if (!m) break; const f = { x1:m[1], y1:m[2], x2:m[3], y2:m[4], [field]:value }; step.code = `swipe((${+f.x1}, ${+f.y1}), (${+f.x2}, ${+f.y2}))`; break; }
       case 'tap':      step.code = `dev.click(${value})`; break;
@@ -567,6 +651,22 @@ export function useTask() {
       step.elementParams[field] = value;
     }
     step.code = generateElementCode(step);
+    _dirtyStep(stepIndex, serial);
+  }
+
+  /** 更新 pom_ref 步骤的某字段（field: pom_page / pom_name / pom_action），
+   *  重写 step.code 成 `dev.<action>(<page>.ELEMENTS["<name>"])`。 */
+  function _updatePomRefField(stepIndex, field, value, serial) {
+    const step = steps.value[stepIndex];
+    if (!step) return;
+    if (!step._pomRef) step._pomRef = { page: '', name: '', action: 'click' };
+    if (field === 'pom_page')   step._pomRef.page = value;
+    else if (field === 'pom_name')   step._pomRef.name = value;
+    else if (field === 'pom_action') step._pomRef.action = value;
+    const { page, name, action } = step._pomRef;
+    if (page && name && action) {
+      step.code = `dev.${action}(${page}.ELEMENTS[${JSON.stringify(name)}])`;
+    }
     _dirtyStep(stepIndex, serial);
   }
 
@@ -652,13 +752,14 @@ export function useTask() {
     taskName, taskDesc, taskPlatform, projectId,
     taskTag, taskFeature, taskStory, taskSeverity, taskRerun,
     steps, _extraLines, localVars, selectedStepIndex, settingsVisible, autoRun, appsCache,
+    pomElementsCache,
     // constants
     SLASH_STEP, KEY_OPTIONS,
     // methods
     clearTask, parseYamlToTask, taskToYaml, taskToYamlSingle, taskToYamlFrom,
     saveCurrentTask, refreshYamlFiles, loadYamlFile, stepToCode, elementFromNode,
     loadStepsFromFile, buildIncludeStep,
-    selectStep, stepIcon, cleanupTaskImages, loadApps,
+    selectStep, stepIcon, cleanupTaskImages, loadApps, loadAllPomElements,
     computedStepType, selectedStepConfig, updateStepField,
     _updateElementField, _updateImgField, removeSelectorField,
     generateElementCode, generateImgCode, buildSelectorString,

@@ -118,5 +118,7 @@ export function useDevice() {
     captureMode, captureStart, captureRect,
     swipeRecordMode, swipePoints, elementSelectMode,
     initPlatform, listDevice, connectDevice, selectNode,
+    enterCaptureMode, exitCaptureMode,
+    enterSwipeRecordMode, exitSwipeRecordMode,
   };
 }

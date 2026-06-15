@@ -87,6 +87,14 @@ const TEMPLATE = `
 
           <template v-if="stepConfig.type === 'element'">
             <div class="prop-section">
+              <div class="prop-section-title">
+                定位模式
+                <el-button size="small" link @click="convertElementToPomRef" style="margin-left:8px" title="切换为引用 POM 元素（保持当前 selector 不丢，但代码改用 ELEMENTS[...] 形式）">
+                  ↔ 转为 POM 引用
+                </el-button>
+              </div>
+            </div>
+            <div class="prop-section">
               <div class="prop-section-title">选择器</div>
               <div class="prop-row" v-for="(val, key) in stepConfig.fields.selector" :key="key">
                 <label class="prop-label">{{ {text:'文本',resourceId:'资源ID',className:'类型',xpath:'XPath',description:'描述',index:'索引'}[key] || key }}</label>
@@ -167,6 +175,46 @@ const TEMPLATE = `
             </div>
           </template>
 
+
+          <template v-if="stepConfig.type === 'pom_ref'">
+            <div class="prop-section">
+              <div class="prop-section-title">
+                定位模式
+                <el-button size="small" link @click="convertPomRefToInline" style="margin-left:8px" title="切换为自定义 selector（复制当前 POM 元素的字段值后失去与 POM 的关联）">
+                  ↔ 转为自定义
+                </el-button>
+              </div>
+            </div>
+            <div class="prop-section">
+              <div class="prop-section-title">POM 引用</div>
+              <div class="prop-row">
+                <label class="prop-label">Page</label>
+                <el-select :model-value="stepConfig.fields.page" @update:modelValue="v => upd('pom_page', v)" @visible-change="onPomRefOpen" size="small" class="prop-input-wide" filterable placeholder="选择 page">
+                  <el-option v-for="p in pomPageOptions" :key="p" :label="p" :value="p"></el-option>
+                </el-select>
+              </div>
+              <div class="prop-row">
+                <label class="prop-label">元素</label>
+                <el-select :model-value="stepConfig.fields.name" @update:modelValue="v => upd('pom_name', v)" size="small" class="prop-input-wide" filterable placeholder="选择元素">
+                  <el-option v-for="n in pomElementOptionsFor(stepConfig.fields.page)" :key="n.name" :label="n.label" :value="n.name"></el-option>
+                </el-select>
+              </div>
+            </div>
+            <div class="prop-section">
+              <div class="prop-section-title">操作</div>
+              <div class="prop-row">
+                <el-select :model-value="stepConfig.fields.action" @update:modelValue="v => upd('pom_action', v)" size="small" style="width:100%">
+                  <el-option label="点击 (click)"        value="click"></el-option>
+                  <el-option label="双击 (double_click)" value="double_click"></el-option>
+                  <el-option label="长按 (long_press)"   value="long_press"></el-option>
+                  <el-option label="等待 (wait)"         value="wait"></el-option>
+                  <el-option label="存在 (exists)"       value="exists"></el-option>
+                  <el-option label="取文本 (get_text)"   value="get_text"></el-option>
+                  <el-option label="断言 (assert_element)" value="assert_element"></el-option>
+                </el-select>
+              </div>
+            </div>
+          </template>
           <template v-if="stepConfig.type === 'imglocate'">
             <div class="img-prop-preview">
               <img :src="selectedStep.image" id="imgConfigPreview" @load="renderImgConfigGrid" />
@@ -426,6 +474,66 @@ export default {
       task.loadApps(device.platform.value, device.serial.value, msg);
     }
 
+    // POM 引用属性面板：page / 元素下拉数据源
+    function onPomRefOpen(open) {
+      if (!open) return;
+      task.loadAllPomElements();
+    }
+    const pomPageOptions = computed(() => {
+      const set = new Set();
+      for (const e of task.pomElementsCache.value) set.add(e.page);
+      return [...set].sort();
+    });
+    function pomElementOptionsFor(page) {
+      return task.pomElementsCache.value
+        .filter(e => e.page === page)
+        .map(e => ({ name: e.name, label: e.doc ? `${e.name}  —  ${e.doc.slice(0, 30)}` : e.name }));
+    }
+
+    // element 步骤 → 转 pom_ref：保留 selector 状态以备转回（存到 step._inlineBackup）
+    function convertElementToPomRef() {
+      const step = selectedStep.value;
+      if (!step) return;
+      task.loadAllPomElements();   // 提前预热下拉
+      const backup = { selector: { ...(step.selector || {}) }, elementAction: step.elementAction, elementParams: { ...(step.elementParams || {}) } };
+      step._inlineBackup = backup;
+      step._type = 'pom_ref';
+      step._pomRef = { page: '', name: '', action: backup.elementAction || 'click' };
+      step.stepType = undefined;
+      step.selector = undefined; step.elementAction = undefined; step.elementParams = undefined;
+      step.code = '# --pom-ref-pending--';   // 占位，等用户选了 page+name 自动生成
+      task.saveCurrentTask(device.serial.value).catch(() => {});
+    }
+
+    // pom_ref → 转 element：从当前 page+name 的 platforms[currentPlatform] 复制 selector 字段过来；
+    // 没采集就回到 _inlineBackup（如有）或空 selector，由用户继续填。
+    function convertPomRefToInline() {
+      const step = selectedStep.value;
+      if (!step) return;
+      const ref = step._pomRef || {};
+      let selector = {};
+      let elementAction = ref.action || 'click';
+      // 优先恢复 _inlineBackup —— 用户之前从 inline 转来的，转回去保原貌
+      if (step._inlineBackup) {
+        selector = step._inlineBackup.selector || {};
+        elementAction = step._inlineBackup.elementAction || elementAction;
+      } else if (ref.page && ref.name) {
+        // 用 pom cache 当前平台分桶填一份
+        const entry = task.pomElementsCache.value.find(e => e.page === ref.page && e.name === ref.name);
+        // pomElementsCache 没存 platforms 详情，只能由前端再拉一次 page。为简单起见：留空，让用户手填。
+        // （UI 会保留 _inlineBackup，多数转回场景已经走那条路径。）
+      }
+      step._type = undefined;
+      step._pomRef = undefined;
+      step._inlineBackup = undefined;
+      step.stepType = 'element';
+      step.elementAction = elementAction;
+      step.selector = selector;
+      step.elementParams = {};
+      step.code = task.generateElementCode(step);
+      task.saveCurrentTask(device.serial.value).catch(() => {});
+    }
+
 
     return {
       task, device, msg, pom, activeTab, nodeFilterText, treeRef,
@@ -434,6 +542,8 @@ export default {
       filterNode,
       insertStepFromElement, addLocatorToPom, copyVal, renderImgConfigGrid, onGridCellClick,
       onLaunchappOpen,
+      onPomRefOpen, pomPageOptions, pomElementOptionsFor,
+      convertElementToPomRef, convertPomRefToInline,
     };
   },
 };

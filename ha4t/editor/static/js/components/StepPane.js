@@ -357,7 +357,7 @@ const TEMPLATE = `
                 </template>
                 <template v-else>
                   <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
-                  <span class="pom-el-sel pom-el-sel-missing" :title="`未在 ${pom.currentPlatform.value} 上采集`">未采集 ({{ pom.currentPlatform.value }})</span>
+                  <span class="pom-el-sel pom-el-sel-missing" :title="'未在 ' + pom.currentPlatform.value + ' 上采集'">未采集 ({{ pom.currentPlatform.value }})</span>
                 </template>
                 <template v-if="verify.verifyMode.value">
                   <el-icon v-if="statusOf(nodeData.name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
@@ -771,6 +771,27 @@ export default {
           .slice(0, 30)
           .map(f => ({ key: f.filename, desc: `${f.name || ''} · ${f.step_count} 步 · ${f.platform}`, isFile: true }));
         slashIdx.value = 0;
+      } else if (cliPrefix.value === 'pom') {
+        const q = cliText.value.toLowerCase();
+        slashVisible.value = true;
+        slashItems.value = task.pomElementsCache.value
+          .filter(it => {
+            if (!q) return true;
+            // 支持 `page.element` 整体过滤、单独过滤、忽略大小写
+            return (it.page + '.' + it.name).toLowerCase().includes(q)
+                || it.page.toLowerCase().includes(q)
+                || it.name.toLowerCase().includes(q);
+          })
+          .slice(0, 30)
+          .map(it => ({
+            key: `${it.page}.${it.name}`,
+            desc: it.doc ? it.doc : (it.hasImage ? '图像元素' : it.platforms.join(',')),
+            isPom: true,
+            pomPage: it.page,
+            pomName: it.name,
+            hasImage: it.hasImage,
+          }));
+        slashIdx.value = 0;
       } else {
         slashVisible.value = false;
       }
@@ -778,6 +799,21 @@ export default {
     function addIncludeStep(filename) {
       undo.pushUndo(task.steps.value);
       const step = task.buildIncludeStep(filename);
+      const idx = task.steps.value.length;
+      task.steps.value.push(step);
+      task.saveCurrentTask(device.serial.value).catch(() => {});
+      task.selectedStepIndex.value = idx;
+    }
+
+    function addPomRefStep(page, name) {
+      undo.pushUndo(task.steps.value);
+      // 默认动作 click —— 用户可以在步骤属性里改成 wait / exists / get_text 等
+      const step = {
+        _type: 'pom_ref',
+        _pomRef: { page, name, action: 'click' },
+        code: `dev.click(${page}.ELEMENTS[${JSON.stringify(name)}])`,
+        _open: false,
+      };
       const idx = task.steps.value.length;
       task.steps.value.push(step);
       task.saveCurrentTask(device.serial.value).catch(() => {});
@@ -815,6 +851,12 @@ export default {
         cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false;
         return;
       }
+      if (item.isPom) {
+        // 选了具体 POM 元素 → 插一个引用步骤
+        addPomRefStep(item.pomPage, item.pomName);
+        cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false;
+        return;
+      }
       if (item.isApp || item.isKey) { cliText.value = item.key; slashVisible.value = false; nextTick(() => cliInputRef.value && cliInputRef.value.focus()); return; }
       if (item.action === 'imglocate') { device.enterCaptureMode(msg); slashVisible.value = false; cliText.value = ''; cliPrefix.value = ''; return; }
       if (item.action === 'swipe')     { device.enterSwipeRecordMode(msg); slashVisible.value = false; cliText.value = ''; cliPrefix.value = ''; return; }
@@ -825,10 +867,20 @@ export default {
       if (item.action === 'key' || item.action === 'include') {
         nextTick(() => onCliInput());
       } else if (item.action === 'launchapp') {
-        // 切到 launchapp 子菜单：先把应用列表拉回来（已有缓存则秒返回），再展开 slash 候选。
-        console.debug('[pickSlash] launchapp; loadApps?', typeof task.loadApps);
         const p = (task.loadApps && task.loadApps(device.platform.value, device.serial.value, msg)) || Promise.resolve();
         Promise.resolve(p).then(() => nextTick(() => onCliInput()));
+      } else if (item.action === 'pom') {
+        // 拉所有 POM page 元素到缓存，再展开 slash 子菜单。已有缓存秒返回。
+        const p = (task.loadAllPomElements && task.loadAllPomElements()) || Promise.resolve();
+        Promise.resolve(p).then(() => {
+          if (!task.pomElementsCache.value.length) {
+            msg && msg.warn && msg.warn('当前工作区还没有任何 POM 元素 —— 请先到「POM 采集」tab 录一个');
+            cliPrefix.value = '';
+            slashVisible.value = false;
+            return;
+          }
+          nextTick(() => onCliInput());
+        });
       } else {
         slashVisible.value = false;
       }
