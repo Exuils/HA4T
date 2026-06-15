@@ -986,6 +986,10 @@ async def ws_run_task(ws: WebSocket):
             text=True,
             env=env,
         )
+        # step.index 始终是子 yaml 内的 1-based 序号；前端按 stepOffset 把它换成
+        # 完整 task steps[] 里的下标（idx = index - 1 + stepOffset）。
+        # 之前后端也把 step_offset 加到 index 里，前端又加一次 → 单步/分段执行时
+        # idx 翻倍越界，step UI 永远卡在 loading。
         step_idx = 0
         prev = None
         for line in proc.stdout:
@@ -994,16 +998,16 @@ async def ws_run_task(ws: WebSocket):
                 continue
             if _STEP_MARKER in line and step_idx < total:
                 if prev is not None:
-                    await ws.send_json({"type": "step", "index": prev + step_offset, "status": "ok"})
+                    await ws.send_json({"type": "step", "index": prev, "status": "ok"})
                 step_idx += 1
-                await ws.send_json({"type": "step", "index": step_idx + step_offset, "status": "running"})
+                await ws.send_json({"type": "step", "index": step_idx, "status": "running"})
                 prev = step_idx
             await ws.send_json({"type": "log", "text": line})
         proc.wait()
 
         all_ok = (proc.returncode == 0)
         if prev:
-            await ws.send_json({"type": "step", "index": prev + step_offset, "status": "ok" if all_ok else "fail"})
+            await ws.send_json({"type": "step", "index": prev, "status": "ok" if all_ok else "fail"})
         ok = total if all_ok else 0
         fail = 0 if all_ok else total
         await ws.send_json({"type": "done", "ok": ok, "fail": fail, "total": total})
