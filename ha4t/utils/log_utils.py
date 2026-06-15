@@ -118,15 +118,22 @@ def _attach_screenshot(name="screenshot", device=None):
 
 def cost_time(func):
     """
-    计算函数运行时间，log打印每个操作事件耗时
+    计算函数运行时间，log 打印每个操作事件耗时。
+
+    顺便剥掉 selector kwargs 里所有 `_` 开头的 meta 字段（如 `_doc`/`_parent`
+    —— POM 元素自带的注释 / 父子关系，给 AI 和编辑器 UI 用，driver 不该看到）。
+    `**ELEMENTS[name]` 把整个 selector dict 解包传进来时，未列出的 meta 字段
+    会被底层 driver 当未知 kwarg 拒绝（u2 的 _selector.__setitem__ 直接 raise）。
+    在这里统一过滤，POM 文件就能干净存储这些元数据而不污染调用方代码。
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        # 剥 `_` 前缀 meta —— `**ELEMENTS[name]` 调用时携带的 doc/parent 等
+        kwargs = {k: v for k, v in kwargs.items() if not k.startswith('_')}
         start_time = time.time()
-        # 格式化显示参数，避免过长
         args_str = str(args)[:100] + "..." if len(str(args)) > 100 else str(args)
         kwargs_str = str(kwargs)[:100] + "..." if len(str(kwargs)) > 100 else str(kwargs)
-        
+
         try:
             with allure.step(f"动作：{func.__name__}, 参数：{args_str}, {kwargs_str}"):
                 result = func(*args, **kwargs)

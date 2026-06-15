@@ -311,72 +311,99 @@ const TEMPLATE = `
         <template v-if="Object.keys(pom.elements.value).length === 0">
           <div class="prop-empty" style="font-size:11px">双击截图控件 / 框选图像区域来采集</div>
         </template>
-        <template v-else>
-          <div v-for="(sel, name) in pom.elements.value" :key="name"
-              :class="['pom-el-card', statusClass(name)]"
-              @mouseenter="onPomRowHover(name)"
-              @mouseleave="onPomRowHover('')">
-            <div class="pom-el-row" v-if="editingElementName !== name">
-              <template v-if="sel && sel.image">
-                <img v-if="pom.imageCache.value[sel.image]"
-                    :src="pom.imageCache.value[sel.image]"
-                    class="pom-el-thumb" :title="sel.image" />
-                <span v-else class="pom-el-thumb pom-el-thumb-missing" :title="sel.image">[image]</span>
-                <span class="pom-el-name" :title="name">{{ name }}</span>
-                <span class="pom-el-sel" :title="sel.image">{{ sel.image }}</span>
-              </template>
-              <template v-else>
-                <span class="pom-el-name" :title="name">{{ name }}</span>
-                <span class="pom-el-sel" :title="JSON.stringify(sel)">{{ formatSelector(sel) }}</span>
-              </template>
-              <template v-if="verify.verifyMode.value">
-                <el-icon v-if="statusOf(name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
-                <span v-else-if="statusOf(name) === 'manual'" class="pom-el-status-tag tag-manual">需手工</span>
-                <span v-else-if="statusOf(name) === 'unsupported'" class="pom-el-status-tag tag-unsupported">平台不支持</span>
-                <span v-else-if="statusOf(name) === 'not_found'" class="pom-el-status-tag tag-notfound"
-                    :title="(verify.results.value[name] && verify.results.value[name].error) || ''">未找到</span>
-              </template>
-              <el-tooltip v-if="pom.elementDocs.value[name]" :content="pom.elementDocs.value[name]" placement="top" :show-after="200">
-                <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
-              </el-tooltip>
-              <el-button size="small" v-if="!(sel && sel.image)" @click="verify.flashOne(name, sel)" title="高亮 3 秒"><el-icon><View /></el-icon></el-button>
-              <el-button size="small" @click="beginEditElement(name, sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
-              <el-button size="small" @click="pom.removeElement(name)" title="删除"><el-icon><Close /></el-icon></el-button>
-            </div>
-            <div class="pom-el-edit" v-else>
-              <div class="prop-row" style="margin-bottom:4px">
-                <label class="prop-label">名称</label>
-                <el-input v-model="editingName" size="small" autofocus></el-input>
+        <el-tree
+          v-else
+          :data="pom.elementTree.value"
+          node-key="name"
+          default-expand-all
+          :expand-on-click-node="false"
+          :indent="14"
+          draggable
+          :allow-drag="canDragNow"
+          :allow-drop="allowPomDrop"
+          @node-drop="onPomNodeDrop"
+          class="pom-el-tree">
+          <template #default="{ data: nodeData }">
+            <div class="pom-el-card" :class="statusClass(nodeData.name)"
+                @mouseenter.stop="onPomRowHover(nodeData.name)"
+                @mouseleave.stop="onPomRowHover('')">
+              <div class="pom-el-row" v-if="editingElementName !== nodeData.name">
+                <el-icon class="pom-drag-handle"
+                    title="拖动调整层级 / 顺序"
+                    @mousedown="armDrag"><Rank /></el-icon>
+                <template v-if="nodeData.sel && nodeData.sel.image">
+                  <img v-if="pom.imageCache.value[nodeData.sel.image]"
+                      :src="pom.imageCache.value[nodeData.sel.image]"
+                      class="pom-el-thumb" :title="nodeData.sel.image" />
+                  <span v-else class="pom-el-thumb pom-el-thumb-missing" :title="nodeData.sel.image">[image]</span>
+                  <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
+                  <span class="pom-el-sel" :title="nodeData.sel.image">{{ nodeData.sel.image }}</span>
+                </template>
+                <template v-else>
+                  <span class="pom-el-name" :title="nodeData.name">{{ nodeData.name }}</span>
+                  <span class="pom-el-sel" :title="JSON.stringify(nodeData.sel)">{{ formatSelector(nodeData.sel) }}</span>
+                </template>
+                <template v-if="verify.verifyMode.value">
+                  <el-icon v-if="statusOf(nodeData.name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
+                  <span v-else-if="statusOf(nodeData.name) === 'manual'" class="pom-el-status-tag tag-manual">需手工</span>
+                  <span v-else-if="statusOf(nodeData.name) === 'unsupported'" class="pom-el-status-tag tag-unsupported">平台不支持</span>
+                  <span v-else-if="statusOf(nodeData.name) === 'not_found'" class="pom-el-status-tag tag-notfound"
+                      :title="(verify.results.value[nodeData.name] && verify.results.value[nodeData.name].error) || ''">未找到</span>
+                </template>
+                <el-tooltip v-if="nodeData.doc" :content="nodeData.doc" placement="top" :show-after="200">
+                  <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
+                </el-tooltip>
+                <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)" @click.stop="verify.flashOne(nodeData.name, nodeData.sel)" title="高亮 3 秒"><el-icon><View /></el-icon></el-button>
+                <el-button size="small" @click.stop="beginEditElement(nodeData.name, nodeData.sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
+                <el-button size="small" @click.stop="pom.removeElement(nodeData.name)" title="删除（子节点会上升到当前父级）"><el-icon><Close /></el-icon></el-button>
               </div>
-              <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
-                <label class="prop-label" style="padding-top:5px">说明</label>
-                <el-input v-model="editingDoc" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明，落到 .py 上方的 # 注释"></el-input>
-              </div>
-              <template v-if="editingSelector.image">
+              <div class="pom-el-edit" v-else>
+                <div class="prop-row" style="margin-bottom:4px">
+                  <label class="prop-label">名称</label>
+                  <el-input v-model="editingName" size="small" autofocus></el-input>
+                </div>
                 <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
-                  <label class="prop-label">图像</label>
-                  <div style="flex:1">
-                    <img v-if="pom.imageCache.value[editingSelector.image]"
-                        :src="pom.imageCache.value[editingSelector.image]"
-                        class="pom-el-preview" />
-                    <div style="font-size:11px;color:var(--fg-2);margin-top:4px;word-break:break-all">{{ editingSelector.image }}</div>
+                  <label class="prop-label" style="padding-top:5px">说明</label>
+                  <el-input v-model="editingDoc" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明，落到 .py 上方的 # 注释"></el-input>
+                </div>
+                <div class="prop-row" style="margin-bottom:4px">
+                  <label class="prop-label">父元素</label>
+                  <el-select v-model="editingParent" size="small" clearable filterable placeholder="（顶层）"
+                      style="flex:1">
+                    <el-option
+                      v-for="opt in parentOptions(nodeData.name)"
+                      :key="opt"
+                      :label="opt"
+                      :value="opt"
+                    ></el-option>
+                  </el-select>
+                </div>
+                <template v-if="editingSelector.image">
+                  <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
+                    <label class="prop-label">图像</label>
+                    <div style="flex:1">
+                      <img v-if="pom.imageCache.value[editingSelector.image]"
+                          :src="pom.imageCache.value[editingSelector.image]"
+                          class="pom-el-preview" />
+                      <div style="font-size:11px;color:var(--fg-2);margin-top:4px;word-break:break-all">{{ editingSelector.image }}</div>
+                    </div>
                   </div>
+                </template>
+                <template v-else>
+                  <div class="prop-row" v-for="key in SELECTOR_KEYS" :key="key" style="margin-bottom:4px">
+                    <label class="prop-label">{{ SELECTOR_LABELS[key] }}</label>
+                    <el-input v-if="key !== 'index'" :model-value="editingSelector[key] || ''" @update:modelValue="v => editingSelector[key] = v" size="small" :placeholder="key === 'xpath' ? '可选，复杂选择器' : ''"></el-input>
+                    <el-input-number v-else :model-value="editingSelector.index === undefined ? null : editingSelector.index" @update:modelValue="v => editingSelector.index = (v === null || v === undefined) ? undefined : v" :min="0" size="small" controls-position="right"></el-input-number>
+                  </div>
+                </template>
+                <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+                  <el-button size="small" @click="cancelEditElement">取消</el-button>
+                  <el-button size="small" type="primary" @click="commitEditElement(nodeData.name)">保存</el-button>
                 </div>
-              </template>
-              <template v-else>
-                <div class="prop-row" v-for="key in SELECTOR_KEYS" :key="key" style="margin-bottom:4px">
-                  <label class="prop-label">{{ SELECTOR_LABELS[key] }}</label>
-                  <el-input v-if="key !== 'index'" :model-value="editingSelector[key] || ''" @update:modelValue="v => editingSelector[key] = v" size="small" :placeholder="key === 'xpath' ? '可选，复杂选择器' : ''"></el-input>
-                  <el-input-number v-else :model-value="editingSelector.index === undefined ? null : editingSelector.index" @update:modelValue="v => editingSelector.index = (v === null || v === undefined) ? undefined : v" :min="0" size="small" controls-position="right"></el-input-number>
-                </div>
-              </template>
-              <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
-                <el-button size="small" @click="cancelEditElement">取消</el-button>
-                <el-button size="small" type="primary" @click="commitEditElement(name)">保存</el-button>
               </div>
             </div>
-          </div>
-        </template>
+          </template>
+        </el-tree>
       </div>
       <div class="prop-empty" v-else>在上方工具栏选择或新建 Page</div>
     </div>
@@ -466,6 +493,17 @@ const TEMPLATE = `
     <div class="prop-row" style="margin-bottom:8px;align-items:flex-start">
       <label class="prop-label" style="padding-top:5px">说明</label>
       <el-input v-model="pom.pendingDoc.value" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明（如「列表项模板，用例追加 [index] 选第几个」）。落到 pom/<page>.py 该元素上方的 # 注释。"></el-input>
+    </div>
+    <div class="prop-row" style="margin-bottom:8px">
+      <label class="prop-label">父元素</label>
+      <el-select v-model="pom.pendingParent.value" size="small" clearable filterable placeholder="（顶层 / 默认）" style="flex:1">
+        <el-option
+          v-for="opt in Object.keys(pom.elements.value)"
+          :key="opt"
+          :label="opt"
+          :value="opt"
+        ></el-option>
+      </el-select>
     </div>
     <template v-if="pom.pendingSelector.value && pom.pendingSelector.value.image">
       <div style="font-size:11px;color:var(--fg-2);margin:8px 0 4px">图像预览（保存后用 dev.click(image=...) 模板匹配定位）</div>
@@ -800,6 +838,7 @@ export default {
     const editingName        = ref('');
     const editingSelector    = ref({});
     const editingDoc         = ref('');     // 编辑中的说明文本；与 pom.elementDocs[name] 同步
+    const editingParent      = ref('');     // 编辑中的父元素名（空 = 顶层）
 
     function formatSelector(sel) {
       if (!sel) return '';
@@ -815,17 +854,90 @@ export default {
       editingName.value = name;
       editingSelector.value = { ...(sel || {}) };
       editingDoc.value = pom.elementDocs.value[name] || '';
+      editingParent.value = pom.elementParents.value[name] || '';
     }
     function cancelEditElement() {
       editingElementName.value = '';
       editingName.value = '';
       editingSelector.value = {};
       editingDoc.value = '';
+      editingParent.value = '';
     }
     function commitEditElement(oldName) {
-      const ok = pom.updateElement(oldName, editingName.value, editingSelector.value, editingDoc.value, msg);
+      const ok = pom.updateElement(
+        oldName, editingName.value, editingSelector.value,
+        editingDoc.value, editingParent.value, msg,
+      );
       if (ok) cancelEditElement();
     }
+
+    // 「父元素」下拉候选 —— 排除自己 + 自己的全部后代（防循环引用）。
+    function parentOptions(self) {
+      const banned = new Set([self]);
+      // BFS 向下收集所有后代
+      const queue = [self];
+      while (queue.length) {
+        const cur = queue.shift();
+        for (const [c, p] of Object.entries(pom.elementParents.value)) {
+          if (p === cur && !banned.has(c)) { banned.add(c); queue.push(c); }
+        }
+      }
+      return Object.keys(pom.elements.value).filter(n => !banned.has(n));
+    }
+
+    // el-tree 拖拽：始终允许成兄弟（before/after）；变子(inner) 要不能形成循环。
+    // el-tree 的 allow-drop(draggingNode, dropNode, type) 返回 false 阻止该 type。
+    function allowPomDrop(dragNode, dropNode, type) {
+      if (!dragNode || !dropNode) return false;
+      const dragName = dragNode.data && dragNode.data.name;
+      const dropName = dropNode.data && dropNode.data.name;
+      if (!dragName || !dropName) return false;
+      if (type === 'inner') {
+        // 不能拖到自己 / 自己的后代里 —— 循环
+        if (dragName === dropName) return false;
+        let cursor = dropName, hops = 0;
+        const seen = new Set();
+        while (cursor && !seen.has(cursor) && hops++ < 1000) {
+          if (cursor === dragName) return false;
+          seen.add(cursor);
+          cursor = pom.elementParents.value[cursor] || '';
+        }
+        return true;
+      }
+      // before / after 同层 sibling，总是允许
+      return true;
+    }
+
+    // 节点放下后：根据落点位置算新 parent，调 pom.setElementParent。
+    function onPomNodeDrop(dragNode, dropNode, dropType /*, ev */) {
+      if (!dragNode || !dropNode) return;
+      const dragName = dragNode.data && dragNode.data.name;
+      if (!dragName) return;
+      let newParent = '';
+      if (dropType === 'inner') {
+        newParent = dropNode.data.name;
+      } else {
+        // before / after：兄弟。新 parent = dropNode 的父；dropNode 在顶层时新 parent=''。
+        const parentNode = dropNode.parent;
+        if (parentNode && parentNode.data && parentNode.data.name) {
+          newParent = parentNode.data.name;
+        }
+      }
+      pom.setElementParent(dragName, newParent, msg);
+      dragArmed.value = false;
+    }
+
+    // 拖拽授权：el-tree 默认整行可拖会和编辑文字 / 双击 / 点按钮的鼠标动作打架，
+    // 改成「只有从把手 icon 按下才进入可拖状态」。canDragNow 由 el-tree :allow-drag 调用。
+    // 全局 mouseup/dragend 兜底：松开 / 拖完后立刻 disarm，下一次必须重新从把手按。
+    const dragArmed = ref(false);
+    function armDrag() { dragArmed.value = true; }
+    function disarmDrag() { dragArmed.value = false; }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mouseup', disarmDrag);
+      window.addEventListener('dragend', disarmDrag);
+    }
+    function canDragNow(/* node */) { return dragArmed.value; }
 
     function onSelectPage(v) {
       verify.endVerify();
@@ -968,8 +1080,10 @@ export default {
       onCliKeydown, onCliInput, submitCli, pickSlash, focusCli, toggleLog,
       // pom
       SELECTOR_KEYS, SELECTOR_LABELS,
-      editingElementName, editingName, editingSelector, editingDoc,
+      editingElementName, editingName, editingSelector, editingDoc, editingParent,
       formatSelector, beginEditElement, cancelEditElement, commitEditElement,
+      parentOptions, allowPomDrop, onPomNodeDrop,
+      canDragNow, armDrag,
       onSelectPage, onDeletePage,
       newPageDialogVisible, newPageName, newPageDesc, onCreatePage,
       codeViewerVisible, codeViewerPath, openCaseSource, openPomSource,

@@ -6,7 +6,7 @@ import {
 import { selectorFromNode } from './useTask.js';
 import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 
-const { ref } = Vue;
+const { ref, computed } = Vue;
 
 // usePom — POM (Page Object Model) capture state + persistence.
 // Pages are stored as one .py per page under <tasks_dir>/pom/.
@@ -23,6 +23,11 @@ export function usePom() {
   // 元素描述（自由文本）—— 后端 round-trip 到 pom/<page>.py 里每条元素上方的 `# ...` 注释，
   // **不进 selector dict**（避免被 driver 当未知 kwarg），仅给 AI / 人读 POM 时理解元素语义。
   const elementDocs        = ref({});
+  // 元素父子关系：{ child_name: parent_name }。后端 round-trip 到 pom/<page>.py
+  // 每条元素 selector dict 的 `_parent` 字段；driver 入口自动剥 `_` 前缀拿不到。
+  // 仅 UI 层：列表渲染成树 + AI 读 POM 时理解结构（"用户名输入框 在 表单 里"）。
+  // 运行时调用形式不变 —— dev.click(**ELEMENTS[name]) 一律扁平 lookup。
+  const elementParents     = ref({});
   // Global meta
   const metaVars           = ref({});
   // Capture state
@@ -31,6 +36,7 @@ export function usePom() {
   const pendingSelector    = ref(null);
   const pendingName        = ref('');
   const pendingDoc         = ref('');    // 命名/编辑弹框里的「说明」textarea；空串 → 不写注释
+  const pendingParent      = ref('');    // 命名弹框里的「父元素」选择；空 → 顶层
   // Image element thumbnails — keyed by image filename, value is "data:..." URL
   // populated by selectPage() (which fetches each referenced image once) and
   // beginImageCapture() (which seeds it with the freshly captured screenshot).
@@ -51,6 +57,7 @@ export function usePom() {
     page.value = ''; desc.value = ''; triggers.value = '';
     elements.value = {};
     elementDocs.value = {};
+    elementParents.value = {};
     imageCache.value = {};
     saveToLocalStorage('currentPomFile', '');
   }
@@ -71,7 +78,7 @@ export function usePom() {
       triggers.value = res.data.triggers || '';
       elements.value = res.data.elements || {};
       elementDocs.value = res.data.docs || {};
-      saveToLocalStorage('currentPomFile', res.data.filename);
+      elementParents.value = res.data.parents || {};
       // 拉取页面里所有 image 元素的缩略图 — fire-and-forget per file，单张失败不阻塞
       const wanted = new Set();
       for (const sel of Object.values(elements.value)) {
@@ -131,6 +138,7 @@ export function usePom() {
       triggers: triggers.value || '',
       elements: elements.value,
       docs: elementDocs.value,
+      parents: elementParents.value,
     }).catch(() => {});
   }
 
@@ -171,6 +179,7 @@ export function usePom() {
       .replace(/\s+/g, ' ')                            // 连续空白压一个，去掉换行
       .trim();
     pendingDoc.value = '';
+    pendingParent.value = '';
     nameDialogVisible.value = true;
   }
 
@@ -182,6 +191,7 @@ export function usePom() {
     pendingSelector.value = { image: filename };
     pendingName.value = '';   // 图像元素无现成名字来源，用户必填
     pendingDoc.value = '';
+    pendingParent.value = '';
     nameDialogVisible.value = true;
   }
 
@@ -239,16 +249,22 @@ export function usePom() {
     if (doc) {
       elementDocs.value = { ...elementDocs.value, [name]: doc };
     }
+    const par = (pendingParent.value || '').trim();
+    // 父元素必须真实存在；空 = 顶层。校验通过才设置。
+    if (par && Object.prototype.hasOwnProperty.call(elements.value, par)) {
+      elementParents.value = { ...elementParents.value, [name]: par };
+    }
     saveCurrentPage();
     nameDialogVisible.value = false;
     pendingSelector.value = null;
     pendingName.value = '';
     pendingDoc.value = '';
+    pendingParent.value = '';
     msg && msg.success && msg.success(`已采集元素: ${name}`);
   }
 
-  // Update an existing element's name / selector / doc. Returns true on success.
-  function updateElement(oldName, newName, newSelector, newDoc, msg) {
+  // Update an existing element's name / selector / doc / parent. Returns true on success.
+  function updateElement(oldName, newName, newSelector, newDoc, newParent, msg) {
     const nn = (newName || '').trim();
     if (!_validName(nn)) {
       _msgError(msg, '元素名不能为空，且不可包含换行、制表符或其它控制字符');
@@ -263,6 +279,32 @@ export function usePom() {
       _msgError(msg, 'selector 不能为空 — 至少保留一个字段');
       return false;
     }
+    // 父元素校验：禁止指向自己 / 不存在的元素 / 循环引用（自己的后代）。
+    const desiredParent = (newParent === undefined || newParent === null)
+      ? (elementParents.value[oldName] || '')
+      : String(newParent).trim();
+    if (desiredParent) {
+      if (desiredParent === nn || desiredParent === oldName) {
+        _msgError(msg, '父元素不能是自己');
+        return false;
+      }
+      if (!Object.prototype.hasOwnProperty.call(elements.value, desiredParent)) {
+        _msgError(msg, `父元素不存在: ${desiredParent}`);
+        return false;
+      }
+      // 循环检测：沿 desiredParent 往上爬，不能撞到 oldName/nn 自己
+      let cursor = desiredParent, hops = 0;
+      const seen = new Set();
+      while (cursor && !seen.has(cursor) && hops++ < 1000) {
+        if (cursor === oldName || cursor === nn) {
+          _msgError(msg, '父元素链产生循环引用');
+          return false;
+        }
+        seen.add(cursor);
+        cursor = elementParents.value[cursor] || '';
+      }
+    }
+
     // Preserve insertion order: if name unchanged, mutate in place; otherwise
     // rebuild dict so the renamed entry stays at its original position.
     const next = {};
@@ -274,26 +316,97 @@ export function usePom() {
     // docs：rename 时跟着搬，doc 文本变了就更新 / 清空。
     const nextDocs = { ...elementDocs.value };
     delete nextDocs[oldName];
-    const docStr = (newDoc === undefined || newDoc === null) ? (elementDocs.value[oldName] || '') : String(newDoc);
+    const docStr = (newDoc === undefined || newDoc === null)
+      ? (elementDocs.value[oldName] || '')
+      : String(newDoc);
     const docTrimmed = docStr.trim();
     if (docTrimmed) nextDocs[nn] = docTrimmed;
     elementDocs.value = nextDocs;
 
+    // parents：同样 rename 跟着搬 + 把别人指向 oldName 的也改成 nn。
+    const nextParents = {};
+    for (const [child, parent] of Object.entries(elementParents.value)) {
+      const newChild  = child === oldName ? nn : child;
+      const newParent2 = parent === oldName ? nn : parent;
+      nextParents[newChild] = newParent2;
+    }
+    delete nextParents[nn];
+    if (desiredParent) nextParents[nn] = desiredParent;
+    elementParents.value = nextParents;
+
     saveCurrentPage();
-    // 验证模式下：单独重判这个元素（rename 时也用 nn —— 新 key）；不动其它项。
     if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(nn);
     return true;
   }
-
+  // 删元素：子节点上升一级（变成它原祖父的子；祖父不在则升到顶层），
+  // 不递归删除。selector 独立工作，子元素的查找语义不受影响。
   function removeElement(name) {
+    const grandparent = elementParents.value[name] || '';
     const next = { ...elements.value };
     delete next[name];
     elements.value = next;
+
     const nextDocs = { ...elementDocs.value };
     delete nextDocs[name];
     elementDocs.value = nextDocs;
+
+    // parents map：删自己 + 把指向自己的子全部指向 grandparent（空 = 升顶层）。
+    const nextParents = {};
+    for (const [child, parent] of Object.entries(elementParents.value)) {
+      if (child === name) continue;            // 自己被删
+      if (parent === name) {
+        if (grandparent) nextParents[child] = grandparent;
+        // grandparent 为空 → 丢掉这条 entry，等同升到顶层
+      } else {
+        nextParents[child] = parent;
+      }
+    }
+    elementParents.value = nextParents;
+
     saveCurrentPage();
     if (window._pomVerifyRevalidate) window._pomVerifyRevalidate(name);
+  }
+
+  // 扁平 elements + parents map → 元素树。给 el-tree :data 用。
+  // 节点结构：{ name, sel, doc, status?, children: [...] }
+  // 顶级顺序、同父下子节点顺序：按 elements 字典插入顺序（Object.entries 保序）。
+  // 异常处理：
+  //  - parent 指向不存在的元素 → 该 child 当顶层渲染（容错）
+  //  - 循环引用（A→B→A）→ 起点会被认为顶层，避免栈溢出
+  const elementTree = computed(() => {
+    const all = Object.keys(elements.value);
+    const valid = new Set(all);
+    // pre-compute children
+    const childrenMap = {};
+    const orphans = [];   // 顶层 + 异常情况兜底
+    for (const name of all) {
+      const p = elementParents.value[name];
+      if (p && valid.has(p)) {
+        (childrenMap[p] = childrenMap[p] || []).push(name);
+      } else {
+        orphans.push(name);
+      }
+    }
+    const build = (name, seen) => {
+      if (seen.has(name)) return null;       // 防循环
+      seen.add(name);
+      return {
+        name,
+        sel: elements.value[name],
+        doc: elementDocs.value[name] || '',
+        children: (childrenMap[name] || []).map(c => build(c, seen)).filter(Boolean),
+      };
+    };
+    return orphans.map(n => build(n, new Set())).filter(Boolean);
+  });
+
+  // 拖拽后改父：el-tree node-drop 调用。drop=null 表示升到顶层。
+  function setElementParent(name, newParent, msg) {
+    if (!Object.prototype.hasOwnProperty.call(elements.value, name)) return false;
+    return updateElement(
+      name, name, elements.value[name], elementDocs.value[name] || null, newParent || '',
+      msg,
+    );
   }
 
   async function installSkill(msg) {
@@ -306,14 +419,15 @@ export function usePom() {
 
   return {
     // state
-    pages, currentFile, page, desc, triggers, elements, elementDocs,
+    pages, currentFile, page, desc, triggers, elements, elementDocs, elementParents,
+    elementTree,                                     // computed 树形视图，给 el-tree :data
     metaVars,
-    captureMode, nameDialogVisible, pendingSelector, pendingName, pendingDoc,
+    captureMode, nameDialogVisible, pendingSelector, pendingName, pendingDoc, pendingParent,
     imageCache,
     // methods
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,
     loadMeta, saveMeta,
     beginCapture, beginImageCapture, setPendingSelectorField, confirmCapture,
-    updateElement, removeElement, installSkill,
+    updateElement, removeElement, setElementParent, installSkill,
   };
 }

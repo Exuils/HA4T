@@ -301,10 +301,23 @@ def _parse_pom_py(content: str) -> dict:
             doc_parts.reverse()
             docs[key_name] = '\n'.join(doc_parts).rstrip()
 
-    return {'meta': meta, 'elements': elements, 'docs': docs, 'vars': pvars}
+    # 拆出 `_parent` meta：UI 用来画树，driver 不该看到；同时把 `_parent` 从
+    # selector dict 里剥掉，让 elements 干净给前端展示（保存时由前端再塞回去）。
+    parents: dict = {}
+    cleaned_elements: dict = {}
+    for k, v in elements.items():
+        if isinstance(v, dict) and '_parent' in v:
+            parent_name = v.get('_parent')
+            if isinstance(parent_name, str) and parent_name:
+                parents[k] = parent_name
+            cleaned_elements[k] = {kk: vv for kk, vv in v.items() if kk != '_parent'}
+        else:
+            cleaned_elements[k] = v
+
+    return {'meta': meta, 'elements': cleaned_elements, 'docs': docs, 'parents': parents, 'vars': pvars}
 
 
-def _render_pom_py(page: str, desc: str, triggers: str, elements: dict, docs: dict | None = None) -> str:
+def _render_pom_py(page: str, desc: str, triggers: str, elements: dict, docs: dict | None = None, parents: dict | None = None) -> str:
     lines = ['# -*- coding: utf-8 -*-', '# kind: pom', f'# page: {page}']
     if desc:
         lines.append(f'# desc: {desc}')
@@ -312,11 +325,16 @@ def _render_pom_py(page: str, desc: str, triggers: str, elements: dict, docs: di
         lines.append(f'# triggers: {triggers}')
     lines += ['', 'ELEMENTS = {']
     docs = docs or {}
+    parents = parents or {}
     for k, v in elements.items():
         doc = (docs.get(k) or '').strip()
         if doc:
             for dl in doc.split('\n'):
                 lines.append(f'    # {dl}'.rstrip())
+        # 父子关系：写入 selector dict 的 `_parent` 字段，driver 入口已剥 `_` 前缀
+        # 不会拿到。selector dict 浅 copy + 补字段，不污染调用方传入的对象。
+        if k in parents and parents[k]:
+            v = dict(v); v['_parent'] = parents[k]
         lines.append(f'    {k!r}: {v!r},')
     lines += ['}', '']
     return '\n'.join(lines)
@@ -645,6 +663,7 @@ class PomPageSaveRequest(BaseModel):
     triggers: str = ''
     elements: dict = {}
     docs: dict = {}     # 元素名 → 自由文本注释；渲染时插在该元素上方 `# ...` 行
+    parents: dict = {}  # 元素名 → 父元素名；为前端树形 UI 提供层级语义
 
 
 class PomMetaSaveRequest(BaseModel):
@@ -688,6 +707,7 @@ def pom_get_page(filename: str):
         'triggers': parsed['meta']['triggers'],
         'elements': parsed['elements'],
         'docs': parsed['docs'],
+        'parents': parsed.get('parents', {}),
     })
 
 
@@ -703,7 +723,7 @@ def pom_save_page(req: PomPageSaveRequest):
     filename = _page_filename(req.page)
     path = _pom_dir() / filename
     path.write_text(
-        _render_pom_py(req.page, req.desc, req.triggers, req.elements, req.docs),
+        _render_pom_py(req.page, req.desc, req.triggers, req.elements, req.docs, req.parents),
         encoding='utf-8',
     )
     _regen_pom_init()
@@ -776,8 +796,10 @@ def pom_verify_selector(req: PomVerifySelectorRequest):
     device = cached_devices.get((req.platform, req.serial))
     if device is None:
         return ApiResponse.doError("设备未连接")
+    # 剥 `_` 前缀 meta（_doc / _parent 等）—— 给 driver 的 selector 必须纯净。
+    sel = {k: v for k, v in req.selector.items() if not k.startswith('_')}
     try:
-        rect = device.find_element_rect(req.selector)
+        rect = device.find_element_rect(sel)
     except Exception as e:
         return ApiResponse.doError(f"查找失败: {type(e).__name__}: {e}")
     return ApiResponse.doSuccess({

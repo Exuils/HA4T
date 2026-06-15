@@ -154,6 +154,34 @@ class TestPomHelpers(unittest.TestCase):
         py2 = _render_pom_py("P", "", "", {"a": {"text": "x"}}, {})
         self.assertEqual(py, py2)
 
+    def test_parent_roundtrip(self):
+        """`_parent` 字段：render 时塞进 selector dict、parse 时拆出来到 parents map。"""
+        elements = {
+            "顶部导航": {"resourceId": "com.x:id/top"},
+            "返回按钮": {"text": "返回"},
+            "标题":     {"resourceId": "com.x:id/title"},
+            "登录按钮": {"text": "登录"},
+        }
+        parents = {"返回按钮": "顶部导航", "标题": "顶部导航"}
+        py = _render_pom_py("登录页", "", "", elements, None, parents)
+        # selector dict 序列化里应当含 `_parent`
+        self.assertIn("'_parent': '顶部导航'", py)
+        # 顶层元素没塞 `_parent`
+        self.assertNotIn("'登录按钮': {'text': '登录', '_parent'", py)
+
+        parsed = _parse_pom_py(py)
+        # elements 应当已剥掉 `_parent`，回到 selector 纯净
+        self.assertEqual(parsed["elements"]["返回按钮"], {"text": "返回"})
+        self.assertEqual(parsed["elements"]["顶部导航"], {"resourceId": "com.x:id/top"})
+        # parents map 完整还原
+        self.assertEqual(parsed["parents"], parents)
+
+    def test_no_parent_emits_empty_map(self):
+        """完全没父子关系的 page → parents=={}。"""
+        py = _render_pom_py("P", "", "", {"a": {"text": "x"}})
+        parsed = _parse_pom_py(py)
+        self.assertEqual(parsed["parents"], {})
+
 class TestPomEndpoints(unittest.TestCase):
     """端点循环：create → list → get → save(更新) → delete + __init__ 验证。"""
 

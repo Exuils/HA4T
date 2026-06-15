@@ -792,3 +792,27 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 }
 .header-current-app .hca-label { color: var(--fg-2); flex-shrink: 0; }
 .header-current-app .hca-text  { color: var(--fg); font-family: Consolas, monospace; }
+
+/* POM 元素树：让 el-tree 的 node 内容区允许 .pom-el-card 撑满 */
+.pom-el-tree { padding: 4px 0; }
+.pom-el-tree .el-tree-node__content {
+  height: auto; min-height: 28px;
+  align-items: stretch; padding-right: 6px;
+}
+.pom-el-tree .el-tree-node__content > .el-tree-node__expand-icon {
+  align-self: center;
+}
+.pom-el-tree .pom-el-card { flex: 1; min-width: 0; }
+
+/* 拖拽把手 —— 默认低饱和度，hover 时高亮提示这是拖动入口 */
+.pom-drag-handle {
+  flex-shrink: 0;
+  margin-right: 6px;
+  cursor: grab;
+  color: var(--fg-2);
+  opacity: 0.55;
+  font-size: 14px;
+  user-select: none;
+}
+.pom-drag-handle:hover  { opacity: 1; color: var(--fg); }
+.pom-drag-handle:active { cursor: grabbing; }
