@@ -43,6 +43,7 @@ dependencies = [
     "psutil",
     "mock",
     "allure-pytest",
+    "pytest-rerunfailures",
     "pywin32; sys_platform == 'win32'",
     "fastapi",
     "uvicorn",
