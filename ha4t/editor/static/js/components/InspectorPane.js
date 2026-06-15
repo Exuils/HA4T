@@ -1,3 +1,6 @@
+import SaveAsSelectorDialog from './SaveAsSelectorDialog.js';
+import { pomGetPage, pomSavePage } from '../api.js';
+
 const { inject, ref, computed, nextTick, watch } = Vue;
 
 // InspectorPane — 中间面板（grid-area: right），3 个 mutually-exclusive 子 tab：
@@ -87,10 +90,13 @@ const TEMPLATE = `
 
           <template v-if="stepConfig.type === 'element'">
             <div class="prop-section">
-              <div class="prop-section-title">
-                定位模式
-                <el-button size="small" link @click="convertElementToPomRef" style="margin-left:8px" title="切换为引用 POM 元素（保持当前 selector 不丢，但代码改用 ELEMENTS[...] 形式）">
-                  ↔ 转为 POM 引用
+              <div class="prop-row" style="align-items:center;justify-content:space-between">
+                <el-segmented :model-value="'inline'"
+                              @update:modelValue="onModeChange"
+                              :options="modeOptions" size="small"></el-segmented>
+                <el-button size="small" @click="openSaveAsSelector" :disabled="!hasAnySelector"
+                           title="把当前 selector 字段固化为 POM 元素，并自动切到「选择器」模式">
+                  <el-icon><DocumentAdd /></el-icon>&nbsp;保存为选择器
                 </el-button>
               </div>
             </div>
@@ -178,11 +184,10 @@ const TEMPLATE = `
 
           <template v-if="stepConfig.type === 'pom_ref'">
             <div class="prop-section">
-              <div class="prop-section-title">
-                定位模式
-                <el-button size="small" link @click="convertPomRefToInline" style="margin-left:8px" title="切换为自定义 selector（复制当前 POM 元素的字段值后失去与 POM 的关联）">
-                  ↔ 转为自定义
-                </el-button>
+              <div class="prop-row" style="align-items:center">
+                <el-segmented :model-value="'pom'"
+                              @update:modelValue="onModeChange"
+                              :options="modeOptions" size="small"></el-segmented>
               </div>
             </div>
             <div class="prop-section">
@@ -305,12 +310,14 @@ const TEMPLATE = `
       </template>
     </template>
   </div>
+  <SaveAsSelectorDialog v-model="saveSelDialogVisible" :payload="saveSelPayload" @confirm="onSaveAsSelectorConfirm" />
 </div>
 `;
 
 export default {
   name: 'InspectorPane',
   template: TEMPLATE,
+  components: { SaveAsSelectorDialog },
 
   setup() {
     const task   = inject('task');
@@ -535,6 +542,118 @@ export default {
     }
 
 
+    // ── 「定位模式」tab toggle ──────────────────────────────────────────────
+    // Segmented 显示两 tab；mode 由当前 step._type 派生（pom_ref → 'pom'，其它 → 'inline'）。
+    const modeOptions = [
+      { label: '自定义', value: 'inline' },
+      { label: '选择器', value: 'pom' },
+    ];
+    function onModeChange(newMode) {
+      const step = selectedStep.value;
+      if (!step) return;
+      const current = (step._type === 'pom_ref') ? 'pom' : 'inline';
+      if (newMode === current) return;
+      if (newMode === 'pom') convertElementToPomRef();
+      else convertPomRefToInline();
+    }
+
+    // 当前 inline step 是否至少有一个 selector 字段值非空 —— 控制「保存为选择器」按钮可点
+    const hasAnySelector = computed(() => {
+      const step = selectedStep.value;
+      if (!step || !step.selector) return false;
+      return Object.values(step.selector).some(v => v !== undefined && v !== null && v !== '');
+    });
+
+    // ── 「保存为选择器」弹框：把当前 inline selector 固化成 POM 元素，再切到 pom 模式 ──
+    const saveSelDialogVisible = ref(false);
+    const saveSelPayload       = ref(null);
+
+    function openSaveAsSelector() {
+      const step = selectedStep.value;
+      if (!step || !hasAnySelector.value) return;
+      saveSelPayload.value = {
+        selector: { ...step.selector },
+        action: step.elementAction || 'click',
+        currentPlatform: device.platform.value || 'android',
+      };
+      saveSelDialogVisible.value = true;
+    }
+
+    /** SaveAsSelectorDialog 提交后：把元素写进 POM page 文件 → 改当前 step 为 pom_ref → 关弹框。
+     *  isNewPage=true 时 page 不在 pages 列表 —— 后端 _render_pom_py 会按新 page 文件创建。
+     */
+    async function onSaveAsSelectorConfirm({ page, name, doc, parent, isNewPage }) {
+      const step = selectedStep.value;
+      if (!step) return;
+      const payload = saveSelPayload.value || {};
+      const platform = payload.currentPlatform || 'android';
+
+      // 1) 拉现有 page 的 elements（已有则 merge；新 page 从空开始）
+      let existing = {};
+      let existingDocs = {};
+      let existingParents = {};
+      if (!isNewPage) {
+        try {
+          const r = await pomGetPage(page + '.py');
+          if (r.success) {
+            existing = r.data.elements || {};
+            existingDocs = r.data.docs || {};
+            existingParents = r.data.parents || {};
+          }
+        } catch (e) { /* 当作新 page 处理 */ }
+      }
+
+      // 2) 新元素 ElementShape：把当前 selector 当 currentPlatform 分桶塞入
+      const newElement = {
+        platforms: { [platform]: { ...(payload.selector || {}) } },
+        image: null,
+        _parent: parent || '',
+        _doc: doc || '',
+      };
+      const nextElements = { ...existing, [name]: newElement };
+      const nextDocs = doc ? { ...existingDocs, [name]: doc } : existingDocs;
+      const nextParents = parent ? { ...existingParents, [name]: parent } : existingParents;
+
+      // 3) 写回 POM page
+      try {
+        const saveRes = await pomSavePage({
+          page, desc: '', triggers: '',
+          elements: nextElements,
+          docs: nextDocs,
+          parents: nextParents,
+        });
+        if (!saveRes.success) {
+          msg && msg.error && msg.error('保存失败：' + (saveRes.message || ''));
+          return;
+        }
+      } catch (e) {
+        msg && msg.error && msg.error('保存失败：' + (e.message || e));
+        return;
+      }
+
+      // 4) 当前 step 改成 pom_ref，备份 inline state 以备转回
+      const backup = {
+        selector: { ...(step.selector || {}) },
+        elementAction: step.elementAction,
+        elementParams: { ...(step.elementParams || {}) },
+      };
+      step._inlineBackup = backup;
+      step._type = 'pom_ref';
+      step._pomRef = { page, name, action: backup.elementAction || 'click' };
+      step.stepType = undefined;
+      step.selector = undefined;
+      step.elementAction = undefined;
+      step.elementParams = undefined;
+      step.code = `dev.${step._pomRef.action}(${page}.ELEMENTS[${JSON.stringify(name)}])`;
+      await task.saveCurrentTask(device.serial.value).catch(() => {});
+
+      // 5) 刷新 pomElementsCache 让 pom_ref tab 的下拉立刻看到新元素
+      try { await task.loadAllPomElements(true); } catch (e) { /* ignore */ }
+
+      saveSelDialogVisible.value = false;
+      msg && msg.success && msg.success(`已保存为 ${page}.${name}`);
+    }
+
     return {
       task, device, msg, pom, activeTab, nodeFilterText, treeRef,
       selectedStep, stepConfig, selectedNodeDetails,
@@ -544,6 +663,8 @@ export default {
       onLaunchappOpen,
       onPomRefOpen, pomPageOptions, pomElementOptionsFor,
       convertElementToPomRef, convertPomRefToInline,
+      modeOptions, onModeChange, hasAnySelector,
+      saveSelDialogVisible, saveSelPayload, openSaveAsSelector, onSaveAsSelectorConfirm,
     };
   },
 };
