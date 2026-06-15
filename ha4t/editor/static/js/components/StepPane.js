@@ -1,6 +1,7 @@
 import { reorderTask } from '../api.js';
 import { fileNameFromName } from '../composables/useTask.js';
 import KvRow from './KvRow.js';
+import CodeViewer from './CodeViewer.js';
 
 const { inject, ref, computed, nextTick, watch } = Vue;
 
@@ -42,6 +43,11 @@ const TEMPLATE = `
       <el-tooltip content="打开文件夹" placement="top">
         <el-button size="small" @click="openFolder">
           <el-icon><Document /></el-icon>
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="查看源码（只读）" placement="top">
+        <el-button size="small" :disabled="!task.currentYamlFile.value" @click="openCaseSource">
+          <el-icon><Reading /></el-icon>
         </el-button>
       </el-tooltip>
       <el-dropdown @command="handleRunCommand" :disabled="!device.isConnected.value || !task.steps.value.length" trigger="click">
@@ -256,6 +262,10 @@ const TEMPLATE = `
         <el-button v-if="!verify.verifyMode.value" size="small" type="primary"
             :disabled="!pom.currentFile.value" @click="verify.beginVerify">验证</el-button>
         <el-button v-else size="small" type="success" @click="verify.endVerify">完成验证</el-button>
+        <el-button size="small" :disabled="!pom.currentFile.value" @click="openPomSource"
+            title="查看 pom/&lt;page&gt;.py 源码（只读）">
+          <el-icon><Reading /></el-icon>
+        </el-button>
         <el-button size="small" @click="pom.installSkill(msg)">装 Skill</el-button>
       </div>
 
@@ -475,13 +485,15 @@ const TEMPLATE = `
       <el-button size="small" type="primary" @click="pom.confirmCapture(msg)">确认</el-button>
     </template>
   </el-dialog>
+
+  <CodeViewer v-model="codeViewerVisible" :path="codeViewerPath" />
 </div>
 `;
 
 export default {
   name: 'StepPane',
   template: TEMPLATE,
-  components: { KvRow },
+  components: { KvRow, CodeViewer },
 
   setup() {
     const task   = inject('task');
@@ -799,6 +811,23 @@ export default {
       pom.selectPage(v, msg);
     }
 
+    // ── 查看源码（只读弹窗） ─────────────────────────────────────────
+    const codeViewerVisible = ref(false);
+    const codeViewerPath    = ref('');     // 相对工作区根的路径
+
+    function openCaseSource() {
+      const fn = task.currentYamlFile.value;
+      if (!fn) { msg && msg.warn && msg.warn('请先选择一个用例'); return; }
+      codeViewerPath.value = `testcases/${fn}`;
+      codeViewerVisible.value = true;
+    }
+    function openPomSource() {
+      const fn = pom.currentFile.value;
+      if (!fn) { msg && msg.warn && msg.warn('请先选择一个 Page'); return; }
+      codeViewerPath.value = `pom/${fn}`;
+      codeViewerVisible.value = true;
+    }
+
     const newPageDialogVisible = ref(false);
     const newPageName = ref('');
     const newPageDesc = ref('');
@@ -912,6 +941,7 @@ export default {
       formatSelector, beginEditElement, cancelEditElement, commitEditElement,
       onSelectPage, onDeletePage,
       newPageDialogVisible, newPageName, newPageDesc, onCreatePage,
+      codeViewerVisible, codeViewerPath, openCaseSource, openPomSource,
       totalSelectorElements, statusOf, statusClass, countByStatus,
       // local vars (case-level)
       localVarsOpen, globalVarsOpen,

@@ -508,6 +508,43 @@ def fs_list(path: str = ""):
     return ApiResponse.doSuccess({"path": str(p), "parent": parent, "entries": entries})
 
 
+@router.get("/files/raw", response_model=ApiResponse)
+def files_raw(path: str):
+    """读取工作区内任意文本文件的原始内容，供前端「查看源码」弹窗用。
+
+    `path` 是相对工作区根的路径（如 `testcases/test_login.py`、`pom/login_page.py`）。
+    限制：只允许 .py / .md / .toml / .txt / .json / .yaml / .yml；目标必须在工作区根
+    之下（防 `..` 遍历）；非文本/超大文件拒绝。
+    """
+    if TASKS_DIR is None:
+        return _no_ws()
+    if not path:
+        return ApiResponse.doError("path 必填")
+    try:
+        # 拼接后 resolve；is_relative_to 确保没逃出工作区根
+        target = (TASKS_DIR / path).resolve()
+        ws_root = TASKS_DIR.resolve()
+        if not target.is_relative_to(ws_root):
+            return ApiResponse.doError("路径越界")
+    except (OSError, ValueError):
+        return ApiResponse.doError("非法路径")
+    if not target.is_file():
+        return ApiResponse.doError("文件不存在")
+    if target.suffix.lower() not in {'.py', '.md', '.toml', '.txt', '.json', '.yaml', '.yml', '.cfg', '.ini'}:
+        return ApiResponse.doError(f"不支持的文件类型: {target.suffix}")
+    # 1 MB 上限——源码查看器不应该用于大文件
+    if target.stat().st_size > 1 * 1024 * 1024:
+        return ApiResponse.doError("文件超过 1 MB，不予显示")
+    try:
+        content = target.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        return ApiResponse.doError("非 UTF-8 文本文件")
+    return ApiResponse.doSuccess({
+        "path": str(target.relative_to(ws_root)).replace('\\', '/'),
+        "content": content,
+    })
+
+
 @router.get("/workspace", response_model=ApiResponse)
 def workspace_status():
     ws = get_workspace()

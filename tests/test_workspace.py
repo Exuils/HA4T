@@ -223,5 +223,50 @@ class TestNoWorkspaceGuard(_WsTestBase):
         self._err(self.client.post("/tasks/open-folder"))
 
 
+class TestFilesRaw(_WsTestBase):
+    """`/files/raw` 用于「查看源码」弹窗 —— 工作区内文本文件只读访问。"""
+
+    def setUp(self):
+        super().setUp()
+        # 启用工作区：直接戳模块级路径，等价 init 但绕过 EditorConfig 持久化
+        ws = Path(self.tmp) / "ws"
+        ws.mkdir()
+        (ws / "testcases").mkdir()
+        (ws / "pom").mkdir()
+        (ws / "testcases" / "foo.py").write_text("print('hi')\n", encoding="utf-8")
+        (ws / "pom" / "login.py").write_text("ELEMENTS = {}\n", encoding="utf-8")
+        api_module.TASKS_DIR = ws
+        api_module.IMAGES_DIR = ws / "images"
+
+    def test_read_case_source(self):
+        data = self._ok(self.client.get("/files/raw?path=testcases/foo.py"))
+        self.assertEqual(data["content"], "print('hi')\n")
+        self.assertEqual(data["path"], "testcases/foo.py")
+
+    def test_read_pom_source(self):
+        data = self._ok(self.client.get("/files/raw?path=pom/login.py"))
+        self.assertEqual(data["content"], "ELEMENTS = {}\n")
+
+    def test_reject_path_traversal(self):
+        # 试图 escape 工作区根
+        resp = self.client.get("/files/raw?path=../etc/passwd")
+        body = resp.json()
+        self.assertFalse(body["success"])
+
+    def test_reject_unsupported_extension(self):
+        (api_module.TASKS_DIR / "a.exe").write_bytes(b"\x00")
+        body = self.client.get("/files/raw?path=a.exe").json()
+        self.assertFalse(body["success"])
+        self.assertIn("不支持", body["message"])
+
+    def test_missing_file(self):
+        body = self.client.get("/files/raw?path=testcases/nope.py").json()
+        self.assertFalse(body["success"])
+
+    def test_missing_path_param(self):
+        body = self.client.get("/files/raw?path=").json()
+        self.assertFalse(body["success"])
+
+
 if __name__ == "__main__":
     unittest.main()

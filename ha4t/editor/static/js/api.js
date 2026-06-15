@@ -245,3 +245,9 @@ export async function fsList(path) {
   const response = await fetch(url);
   return checkResponse(response);
 }
+
+// 读取工作区内任意文本文件的原始内容（仅供「查看源码」弹窗用）。
+export async function getFileRaw(path) {
+  const response = await fetch(`${API_HOST}files/raw?path=${encodeURIComponent(path)}`);
+  return checkResponse(response);
+}

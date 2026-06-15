@@ -749,3 +749,34 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .header-workspace .ws-name { color: var(--fg); font-weight: 600; }
+
+/* ── 源码查看器（只读 hljs 弹窗） ─────────────────────────────────── */
+.code-viewer-loading,
+.code-viewer-error {
+  padding: 24px; text-align: center; color: var(--fg-2); font-size: 12px;
+}
+.code-viewer-error { color: #f56c6c; }
+
+.code-viewer-wrap {
+  max-height: 70vh; overflow: auto;
+  background: var(--bg-2); border: 1px solid var(--bd); border-radius: 4px;
+}
+
+.code-viewer-pre {
+  margin: 0; padding: 0;
+  counter-reset: ln;
+  font-family: Consolas, 'Cascadia Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
+  font-size: 12.5px; line-height: 1.55;
+}
+
+/* hljs 的 <code> —— 全文一块，行号靠 ::before 计数器逐行加 */
+.code-viewer-pre code.hljs,
+.code-viewer-pre code {
+  display: block;
+  padding: 10px 0;
+  background: transparent !important;   /* 让 .code-viewer-wrap 的背景透出来 */
+  white-space: pre;
+  overflow-x: auto;
+}
+/* 删掉 hljs 自带的 padding，避免和 wrap 的 padding 叠 */
+.code-viewer-pre code.hljs { padding: 10px 12px; }
