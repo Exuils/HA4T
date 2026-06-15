@@ -77,14 +77,19 @@ class TestDeviceConnect(unittest.TestCase):
         self.assertEqual(b.config.screen_size, (720, 1280))
 
     def test_legacy_api_removed(self):
+        """老 module-level API（ha4t.api / Config / _active_device）应当不存在；
+        而 ``ha4t.device`` 现在是 mixin 包，导入应当 OK 且暴露 ``Device`` 类。"""
         import importlib
         with self.assertRaises(ImportError):
             importlib.import_module('ha4t.api')
         from ha4t import config as cfg_mod
         self.assertFalse(hasattr(cfg_mod, 'Config'))
         import ha4t as pkg
-        self.assertFalse(hasattr(pkg, 'device'))
         self.assertFalse(hasattr(pkg, '_active_device'))
+        # 新 device 包应当存在并暴露 Device
+        from ha4t.device import Device as DeviceFromPkg
+        from ha4t import Device as DeviceFromRoot
+        self.assertIs(DeviceFromPkg, DeviceFromRoot)
 
 class TestDriverAbstraction(unittest.TestCase):
     """验证各平台 driver 的 tap/screen_size 分派正确。"""
