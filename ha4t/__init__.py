@@ -94,7 +94,8 @@ def include(path: str) -> None:
     其余源码在调用者的全局命名空间中 ``exec``——这样被引用文件可以直接
     使用调用者已经建立的 ``dev`` 连接 / ``sleep`` 等符号，无需重新连接设备。
 
-    路径解析顺序：调用者所在目录 → 当前工作目录 → 字面路径。
+    路径解析顺序：调用者所在目录 → 调用者所在目录下的 testcases/（编辑器工作区模式）→
+    当前工作目录下的 testcases/ → 当前工作目录 → 字面路径。
     通过 ``_INCLUDE_STACK`` 防止循环引用。
     """
     import inspect
@@ -103,7 +104,10 @@ def include(path: str) -> None:
     caller_file = frame.f_globals.get("__file__")
     candidates: List[str] = []
     if caller_file:
-        candidates.append(os.path.join(os.path.dirname(os.path.abspath(caller_file)), path))
+        caller_dir = os.path.dirname(os.path.abspath(caller_file))
+        candidates.append(os.path.join(caller_dir, path))
+        candidates.append(os.path.join(caller_dir, "testcases", path))
+    candidates.append(os.path.join(os.getcwd(), "testcases", path))
     candidates.append(os.path.join(os.getcwd(), path))
     candidates.append(path)
 

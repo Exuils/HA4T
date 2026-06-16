@@ -132,7 +132,14 @@ class Template(object):
             return ret
 
     def _imread(self):
-        return cv.imread(self.filepath)
+        """读取模板图像。使用 numpy.fromfile + cv.imdecode 避免 Windows 中文路径乱码。"""
+        filepath = self.filepath
+        try:
+            with open(filepath, 'rb') as f:
+                data = np.frombuffer(f.read(), np.uint8)
+            return cv.imdecode(data, cv.IMREAD_COLOR)
+        except Exception:
+            return cv.imread(filepath)
 
     def _find_all_template(self, image, screen):
         return TemplateMatching(image, screen, threshold=self.threshold, rgb=self.rgb).find_all_results()
