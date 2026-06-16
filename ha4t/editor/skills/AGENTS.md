@@ -66,7 +66,7 @@ dev.driver.press("home")                   # 系统按键
 
 | 方法 | 说明 | 关键参数 |
 |------|------|---------|
-| `dev.click(sel)` | 点击元素 | `sel`: Selector / canonical kwargs / 比例坐标 `(0.5, 0.5)` |
+| `dev.click(sel)` | 点击元素 | `sel`: Selector / canonical kwargs / 比例坐标 `(0.5, 0.5)`；图像元素加 `rgb=True` 区分颜色 |
 | `dev.double_click(sel)` | 双击 | `interval`: 0.05 |
 | `dev.long_press(sel)` | 长按 | `duration`: 1.0 |
 | `dev.swipe(p1, p2)` | 滑动（像素或比例） | 可选 `duration`/`steps` |

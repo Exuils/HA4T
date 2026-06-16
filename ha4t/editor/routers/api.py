@@ -863,7 +863,7 @@ def pom_verify_selector(req: PomVerifySelectorRequest):
             _GC.current_path = str(IMAGES_DIR)
         try:
             source = np.array(screenshot_pil)
-            tpl = Template(img_name, threshold=0.8)
+            tpl = Template(img_name, threshold=0.8, rgb=True)
             result = tpl._cv_match(source)
         except Exception:
             result = None
