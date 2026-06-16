@@ -15,14 +15,21 @@ class FileMixin:
         self.driver.pull_file(remote, filename)
 
     @cost_time
-    def upload_files(self, src_path: str) -> None:
-        """上传文件或文件夹到设备 ``/sdcard/`` 根目录下。"""
+    def upload_files(self, src_path: str, remote_dir: str = "") -> None:
+        """上传文件或文件夹到设备。
+
+        Args:
+            src_path: 本地文件或文件夹路径
+            remote_dir: 设备目标子目录（相对 /sdcard/），如 "Download" → /sdcard/Download/。
+                        默认 "" 即 /sdcard/ 根目录。
+        """
+        target_base = f"/sdcard/{remote_dir}/".replace("//", "/")
         if os.path.isdir(src_path):
             from ha4t.utils.files_operat import get_file_list as _gfl
             for f in _gfl(src_path):
-                self.driver.push_file(f, f"/sdcard/{os.path.basename(f)}")
+                self.driver.push_file(f, f"{target_base}{os.path.basename(f)}")
         else:
-            self.driver.push_file(src_path, f"/sdcard/{os.path.basename(src_path)}")
+            self.driver.push_file(src_path, f"{target_base}{os.path.basename(src_path)}")
         log_out(f"文件 {src_path} 上传成功")
 
     @cost_time
