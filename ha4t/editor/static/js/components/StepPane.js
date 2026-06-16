@@ -432,7 +432,8 @@ const TEMPLATE = `
             </div>
           </template>
         </el-tree>
-          </div>
+            </div>
+      </div>   <!-- closes pom-section -->
       <div class="drawer-header" @click="globalVarsOpen = !globalVarsOpen">
         <span>全局 VARS <span class="drawer-count" v-if="Object.keys(pom.metaVars.value).length">({{ Object.keys(pom.metaVars.value).length }})</span></span>
         <el-tooltip placement="top">

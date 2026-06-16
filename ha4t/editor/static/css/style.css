@@ -581,7 +581,15 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
   flex: 1; min-height: 0;
   overflow-y: auto;
 }
-
+.pom-pane-body .drawer-header,
+.pom-pane-body .drawer-body {
+  position: sticky; bottom: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+.pom-pane-body .drawer-header {
+  z-index: 2;  /* above drawer-body content */
+}
 /* ── POM page meta 单行（desc / triggers）────────────────────────── */
 .pom-pane-header .pom-meta-row {
   display: flex; gap: 6px; padding: 0 10px 6px;
