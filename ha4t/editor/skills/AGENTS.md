@@ -6,8 +6,8 @@
 
 1. **禁止新建、修改或删除 `pom/` 下任何文件**（包括 `_meta.py`）。POM 只由编辑器采集生成，你不知道真实页面上 resourceId / text / xpath 的值
 2. **只能引用 `ELEMENTS` 中已存在的元素**，唯一可调的是 `index` 参数：`dev.click(ELEMENTS["商品项"].format(index=2))`
-3. **禁止猜测 locator 值**。缺失元素只能在回复末尾输出缺失清单并引导采集，不得用临时定位绕过
-4. 临时定位有限允许（用户明确说的一段文字）：`dev.click(Selector(android={"text": "确定"}))` 或 `dev.click(text="确定")`——但**不是常规手段**
+3. **禁止猜测复杂 locator 值**。复杂元素（含 xpath / resourceId / className 组合的）只能在缺失清单输出引导采集
+4. 临时定位：页面上的可见文案（text / description）或根据现有 POM 模式推导的简单 selector 可以直接在用例内联——不修改 pom/ 文件，仅当前用例有效
 
 ## 用例生成
 
@@ -29,7 +29,11 @@ dev.wait(首页.ELEMENTS["首页加载完成"], timeout=10)
 
 关键约定：
 - `# --step--` 标记一个逻辑步骤，标记后可以是任意复杂代码
-- 元素一律 `dev.click(Page.ELEMENTS["name"])`，不带 `**`
+- 已采集的元素 → `dev.click(Page.ELEMENTS["name"])`，**优先使用**
+- 可在用例内基于 POM 已有元素推导：`ELEMENTS["商品项"].format(index=i)` 配合 `for` 循环轮询
+- 简单临时定位（页面可见文案 / 根据现有 POM 模式推导的简单定位）可直接内联：
+  `dev.click(Selector(android={"text": "确定"}))` 或 `dev.click(text="确定")`
+- 临时定位**不修改 pom/ 文件**，仅当前用例有效
 - 全局变量 → `VARS["key"]`；用例特有 → `LOCAL_VARS["key"]`
 - 复用用例 → `include("other_case.py")`
 
