@@ -92,11 +92,12 @@ const TEMPLATE = `
       <div v-if="task.steps.value.length === 0" class="step-empty">
         在下方输入命令, 或按 <b>/</b> 选择动作
       </div>
-      <div v-for="(s, i) in task.steps.value" :key="i"
+      <div v-for="(s, i) in task.steps.value" :key="s._id"
           :class="['step-row',
                    s._type === 'imglocate' ? 'step-img' : '',
                    s._type === 'include' ? 'step-include' : '',
                    { 'step-selected': task.selectedStepIndex.value === i }]"
+          :data-step-id="s._id"
           @click="task.selectStep(i)" style="position:relative">
         <div v-if="s.remark" class="step-remark">
           <span class="step-remark-icon">#</span>{{ s.remark }}
@@ -622,6 +623,8 @@ export default {
     const cliFlash       = ref(false);
     const stepListRef    = ref(null);
     const cliInputRef    = ref(null);
+    let _stepIdCounter = Date.now();
+    function _nextStepId() { return _stepIdCounter++; }
 
     let sortableInstance = null;
 
@@ -636,8 +639,17 @@ export default {
           const [moved] = newOrder.splice(evt.oldIndex, 1);
           newOrder.splice(evt.newIndex, 0, moved);
           undo.pushUndo(task.steps.value);
-          const moved2 = task.steps.value.splice(evt.oldIndex, 1)[0];
-          task.steps.value.splice(evt.newIndex, 0, moved2);
+          // 根据 DOM 实际视觉顺序重建 steps 数组，避免 :key="s._id" + sortable DOM 移动冲突
+          const container = evt.to || evt.from;
+          if (container) {
+            const domIds = Array.from(container.querySelectorAll('[data-step-id]')).map(el => el.dataset.stepId);
+            const idMap = {};
+            task.steps.value.forEach(s => { idMap[s._id] = s; });
+            const reordered = domIds.map(id => idMap[id]).filter(Boolean);
+            if (reordered.length === task.steps.value.length) {
+              task.steps.value = reordered;
+            }
+          }
           task.selectStep(evt.newIndex);
           if (task.currentYamlFile.value) {
             const res = await reorderTask(task.currentYamlFile.value, newOrder);
@@ -757,7 +769,7 @@ export default {
         slashIdx.value = 0;
         const q = cliText.value.slice(1).toLowerCase();
         slashItems.value = task.SLASH_STEP.filter(a => a.action.startsWith(q));
-      } else if (cliPrefix.value === 'launchapp') {
+      } else if (cliPrefix.value === 'launchapp' || cliPrefix.value === 'stopapp' || cliPrefix.value === 'restartapp' || cliPrefix.value === 'clearapp') {
         const q = cliText.value.toLowerCase();
         slashVisible.value = true;
         slashItems.value = task.appsCache.value.filter(p => p.toLowerCase().includes(q)).slice(0, 20).map(p => ({ key: p, desc: '', isApp: true }));
@@ -804,6 +816,7 @@ export default {
     function addIncludeStep(filename) {
       undo.pushUndo(task.steps.value);
       const step = task.buildIncludeStep(filename);
+      step._id = _nextStepId();
       const idx = task.steps.value.length;
       task.steps.value.push(step);
       task.saveCurrentTask(device.serial.value).catch(() => {});
@@ -818,6 +831,7 @@ export default {
         _pomRef: { page, name, action: 'click' },
         code: `dev.click(${page}.ELEMENTS[${JSON.stringify(name)}])`,
         _open: false,
+        _id: _nextStepId(),
       };
       const idx = task.steps.value.length;
       task.steps.value.push(step);
@@ -843,7 +857,11 @@ export default {
       undo.pushUndo(task.steps.value);
       const code = task.stepToCode(action, value);
       const idx = task.steps.value.length;
-      task.steps.value.push({ code, remark: '', _status: 'pending', _detail: '', _duration: null });
+      const newStep = { code, remark: '', _status: 'pending', _detail: '', _duration: null, _id: _nextStepId() };
+      if (['stopapp','restartapp','clearapp','screenshot','input','assert'].includes(action)) {
+        newStep._type = action;
+      }
+      task.steps.value.push(newStep);
       task.saveCurrentTask(device.serial.value).catch(() => {});
       task.selectedStepIndex.value = idx;
       cliText.value = ''; cliPrefix.value = ''; slashVisible.value = false;
@@ -871,7 +889,7 @@ export default {
       cliPlaceholder.value = item.desc;
       if (item.action === 'key' || item.action === 'include') {
         nextTick(() => onCliInput());
-      } else if (item.action === 'launchapp') {
+      } else if (item.action === 'launchapp' || item.action === 'stopapp' || item.action === 'restartapp' || item.action === 'clearapp') {
         const p = (task.loadApps && task.loadApps(device.platform.value, device.serial.value, msg)) || Promise.resolve();
         Promise.resolve(p).then(() => nextTick(() => onCliInput()));
       } else if (item.action === 'pom') {

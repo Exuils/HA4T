@@ -15,6 +15,12 @@ const SLASH_STEP = [
   { action: 'imglocate', desc: '图片定位 (模板匹配)' },
   { action: 'include',   desc: '引用其他用例 (复用步骤)' },
   { action: 'code',      desc: '自定义代码' },
+  { action: 'stopapp',    desc: '停止应用 (killapp)' },
+  { action: 'restartapp', desc: '重启应用' },
+  { action: 'clearapp',   desc: '清除应用数据' },
+  { action: 'screenshot', desc: '截图保存到本地' },
+  { action: 'input',      desc: '输入文本' },
+  { action: 'assert',     desc: '断言元素存在/文本' },
 ];
 
 const KEY_OPTIONS = [
@@ -116,8 +122,9 @@ function parseKwArgs(argsStr) {
   return args;
 }
 
+let _stepIdCounter = Date.now();
 function parseStepCode(code) {
-  const s = { code, _status: 'pending', _detail: '', _duration: null };
+  const s = { code, _status: 'pending', _detail: '', _duration: null, _id: _stepIdCounter++ };
   // Include marker: 'include("xxx.py")' — calls ha4t.include() at runtime,
   // which exec's the referenced .py in this script's globals (sharing dev /
   // sleep). The editor expands this into a foldable preview card.
@@ -511,6 +518,12 @@ export function useTask() {
       key:       `dev.press("${esc(value)}")`,
       launchapp: `dev.start_app("${esc(value)}")`,
       wait:      `sleep(${value})`,
+      stopapp:    `dev.stop_app("${esc(value)}")`,
+      restartapp: `dev.restart_app("${esc(value)}")`,
+      clearapp:   `dev.clear_app("${esc(value)}")`,
+      screenshot: `dev.screenshot("step_${Date.now()}.png")`,
+      input:      `dev.press("${esc(value)}")`,
+      assert:     `dev.assert_element(text="${esc(value)}")`,
     };
     return m[action] || esc(value);
   }
@@ -580,12 +593,19 @@ export function useTask() {
     if (step._type === 'pom_ref') return 'pom_ref';
     if (step.stepType === 'element') return 'element';
     if (step._type === 'imglocate') return 'imglocate';
+    if (/^(dev\.)?stop_app\(/.test(c)) return 'stopapp';
+    if (/^(dev\.)?restart_app\(/.test(c)) return 'restartapp';
+    if (/^(dev\.)?clear_app\(/.test(c)) return 'clearapp';
+    if (/^(dev\.)?screenshot\(/.test(c)) return 'screenshot';
+    if (/^(dev\.)?press\("/.test(c) && step._type === 'input') return 'input';
+    if (/^(dev\.)?assert_element\(/.test(c) && step._type === 'assert') return 'assert';
     if (/^(dev\.)?swipe\(/.test(c)) return 'swipe';
     if (c.startsWith('# --step--')) return 'code';
     if (c.startsWith('key(')) return 'key';
     if (c.startsWith('sleep(')) return 'wait';
     if (/^(dev\.)?start_app\(/.test(c)) return 'launchapp';
     if (/^(dev\.)?press\(/.test(c)) return 'key';
+    console.log('[computedStepType] unhandled code=' + JSON.stringify(c.substring(0, 80)) + ' step._type=' + step._type + ' fallback=code');
     return 'code';
   }
 
@@ -611,6 +631,20 @@ export function useTask() {
       case 'key': { const m = c.match(/(?:press|key)\("([^"]*)"\)/); config.fields = { key: m ? m[1] : '' }; break; }
       case 'launchapp': { const m = c.match(/start_app\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
       case 'wait': { const m = c.match(/(?:time\.)?sleep\(([\d.]+)\)/); config.fields = { seconds: m ? +m[1] : 1 }; break; }
+      case 'stopapp': { const m = c.match(/stop_app\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
+      case 'restartapp': { const m = c.match(/restart_app\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
+      case 'clearapp': { const m = c.match(/clear_app\("([^"]*)"\)/); config.fields = { package: m ? m[1] : '' }; break; }
+      case 'screenshot': config.fields = {}; break;
+      case 'input': {
+        const m = c.match(/press\("([^"]*)"\)/);
+        config.fields = { text: m ? m[1] : '' };
+        break;
+      }
+      case 'assert': {
+        const m = c.match(/assert_element\(text="([^"]*)"\)/);
+        config.fields = { text: m ? m[1] : '' };
+        break;
+      }
       default: config.fields = { _raw: c };
     }
     return config;
@@ -631,6 +665,17 @@ export function useTask() {
       case 'key':      step.code = `dev.press("${esc(value)}")`; break;
       case 'launchapp':step.code = `dev.start_app("${esc(value)}")`; break;
       case 'wait':     step.code = `sleep(${value})`; break;
+      case 'stopapp':   step.code = `dev.stop_app("${esc(value)}")`; break;
+      case 'restartapp':step.code = `dev.restart_app("${esc(value)}")`; break;
+      case 'clearapp':  step.code = `dev.clear_app("${esc(value)}")`; break;
+      case 'input': {
+        step.code = `dev.press("${esc(value)}")`;
+        break;
+      }
+      case 'assert': {
+        step.code = `dev.assert_element(text="${esc(value)}")`;
+        break;
+      }
     }
     _dirtyStep(stepIndex, serial);
   }

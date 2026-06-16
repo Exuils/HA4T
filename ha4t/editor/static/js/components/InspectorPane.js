@@ -292,6 +292,41 @@ const TEMPLATE = `
             </div>
           </template>
 
+          <template v-if="stepConfig.type === 'stopapp'">
+            <div class="prop-row"><label class="prop-label">包名</label>
+              <el-select :model-value="stepConfig.fields.package || ''" @update:modelValue="v => upd('stopapp', v)" @visible-change="onLaunchappOpen" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
+                <el-option v-for="pkg in task.appsCache.value" :key="pkg" :label="pkg" :value="pkg"></el-option>
+              </el-select>
+            </div>
+          </template>
+          <template v-if="stepConfig.type === 'restartapp'">
+            <div class="prop-row"><label class="prop-label">包名</label>
+              <el-select :model-value="stepConfig.fields.package || ''" @update:modelValue="v => upd('restartapp', v)" @visible-change="onLaunchappOpen" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
+                <el-option v-for="pkg in task.appsCache.value" :key="pkg" :label="pkg" :value="pkg"></el-option>
+              </el-select>
+            </div>
+          </template>
+          <template v-if="stepConfig.type === 'clearapp'">
+            <div class="prop-row"><label class="prop-label">包名</label>
+              <el-select :model-value="stepConfig.fields.package || ''" @update:modelValue="v => upd('clearapp', v)" @visible-change="onLaunchappOpen" size="small" class="prop-input-wide" filterable allow-create default-first-option placeholder="选择或输入包名...">
+                <el-option v-for="pkg in task.appsCache.value" :key="pkg" :label="pkg" :value="pkg"></el-option>
+              </el-select>
+            </div>
+          </template>
+          <template v-if="stepConfig.type === 'screenshot'">
+            <div class="prop-row"><span style="color:#888;font-size:12px">截图保存为 PNG 文件</span></div>
+          </template>
+          <template v-if="stepConfig.type === 'input'">
+            <div class="prop-row"><label class="prop-label">文本</label>
+              <el-input :model-value="stepConfig.fields.text" @update:modelValue="v => upd('input', v)" size="small" class="prop-input-wide" placeholder="输入文本内容..."/>
+            </div>
+          </template>
+          <template v-if="stepConfig.type === 'assert'">
+            <div class="prop-row"><label class="prop-label">文本</label>
+              <el-input :model-value="stepConfig.fields.text" @update:modelValue="v => upd('assert', v)" size="small" class="prop-input-wide" placeholder="期望出现的文本..."/>
+            </div>
+          </template>
+
           <template v-if="stepConfig.type === 'code'">
             <div class="prop-row prop-code-row">
               <el-input type="textarea" :model-value="selectedStep.code" @update:modelValue="v => upd('code', v)" :rows="5" class="prop-textarea"></el-input>
@@ -342,6 +377,7 @@ export default {
     watch(nodeFilterText, (val) => {
       treeRef.value && treeRef.value.filter(val);
     });
+
 
     const selectedStep = computed(() => {
       const i = task.selectedStepIndex.value;
