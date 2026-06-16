@@ -302,10 +302,7 @@ const TEMPLATE = `
 
       <div class="pom-tools-verify-status" v-if="verify.verifyMode.value">
         <span class="verify-count">
-          已找到 {{ countByStatus('found') }} / {{ totalSelectorElements }} 个 selector 元素
-        </span>
-        <span class="verify-manual" v-if="countByStatus('manual') > 0">
-          · {{ countByStatus('manual') }} 个图像元素需手工验证
+          已找到 {{ countByStatus('found') }} / {{ totalSelectorElements }} 个元素
         </span>
         <span class="verify-pending" v-if="countByStatus('pending') > 0">
           · 扫描中 {{ countByStatus('pending') }}
@@ -1082,15 +1079,14 @@ export default {
       await pom.deletePage(pom.currentFile.value, msg);
     }
 
-    const totalSelectorElements = computed(() =>
-      Object.values(pom.elements.value).filter(s => !(s && typeof s === 'object' && 'image' in s)).length);
+    const totalSelectorElements = computed(() => Object.keys(pom.elements.value).length);
     function statusOf(name) {
       const r = verify.results.value[name];
       return r ? r.status : '';
     }
     const STATUS_CLASS = {
       found: 'pom-el-status-found', not_found: 'pom-el-status-notfound',
-      pending: 'pom-el-status-pending', manual: 'pom-el-status-manual',
+      pending: 'pom-el-status-pending',
       unsupported: 'pom-el-status-unsupported',
     };
     function statusClass(name) {

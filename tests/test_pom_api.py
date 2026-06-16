@@ -521,13 +521,19 @@ class TestPomVerifySelector(unittest.TestCase):
         self.assertFalse(body["success"])
         self.assertIn("设备未连接", body["message"])
 
-    def test_verify_selector_rejects_image_element(self):
-        body = self._post({
-            "platform": "android", "serial": "S1",
-            "selector": {"image": "x.png"},
-        })
+    def test_verify_selector_image_element_no_template(self):
+        """image 元素不再拒绝，而是走模板匹配。没模板文件时报 '图片模板不存在'。"""
+        from unittest.mock import MagicMock
+        from ha4t.editor._device import AndroidDevice
+        mock_dev = MagicMock(spec=AndroidDevice)
+        mock_dev.take_screenshot.return_value = ""
+        with patch.dict(api_module.cached_devices, {("android", "S1"): mock_dev}, clear=True):
+            body = self._post({
+                "platform": "android", "serial": "S1",
+                "selector": {"image": "x.png"},
+            })
         self.assertFalse(body["success"])
-        self.assertIn("image", body["message"])
+        self.assertIn("图片模板不存在", body["message"])
 
     def test_verify_selector_rejects_empty(self):
         body = self._post({

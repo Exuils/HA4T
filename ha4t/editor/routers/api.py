@@ -2,6 +2,10 @@
 
 import ast
 import base64
+from io import BytesIO
+import numpy as np
+from PIL import Image as PIL_Image
+import cv2
 import json
 import keyword
 import os
@@ -827,31 +831,61 @@ class PomVerifySelectorRequest(BaseModel):
 
 @router.post("/pom/verify-selector", response_model=ApiResponse)
 def pom_verify_selector(req: PomVerifySelectorRequest):
-    """对单个 POM selector 调底层 driver 实际查找，返回命中区域。
+    """对单个 POM selector 调底层 driver 或图像匹配实际查找，返回命中区域。
 
-    req.selector 兼容两种 shape：
-      - ElementShape `{platforms: {<plat>: {...}}, image, _parent, _doc}`：取 platforms[req.platform]
-      - 老扁平 dict `{text:..., resourceId:...}`：直接当当前平台 native kwargs
-    image 元素需在设备上手工验证，直接报错。
+    selector 兼容两种 shape：
+      - ElementShape `{platforms: {<plat>: {...}}, image, ...}`：取 platforms[req.platform] 或 image
+      - 老扁平 dict `{text:..., resourceId:...}`：直接当 native kwargs
+    image 元素走图像模板匹配（截图 + 模板查找），不弹手工验证。
     """
     if not req.selector:
         return ApiResponse.doError("selector 不能为空")
     raw = dict(req.selector)
-    # ElementShape：抽出当前平台的 bucket，image 直接报错
-    if 'platforms' in raw or 'image' in raw:
-        if raw.get('image'):
-            return ApiResponse.doError("image 元素需在设备上手工验证")
-        bucket = (raw.get('platforms') or {}).get(req.platform) or {}
+    device = cached_devices.get((req.platform, req.serial))
+    if device is None:
+        return ApiResponse.doError("设备未连接")
+
+    # ── image 元素：截图 + 模板匹配 ──────────────────────────────────
+    if 'image' in raw:
+        img_name = raw['image']
+        tmpl = (IMAGES_DIR / img_name) if IMAGES_DIR else Path(img_name)
+        if not tmpl.exists():
+            return ApiResponse.doError(f"图片模板不存在: {img_name}")
+        try:
+            b64 = device.take_screenshot()
+            screen = np.array(PIL_Image.open(BytesIO(base64.b64decode(b64))))
+        except Exception:
+            return ApiResponse.doError("截图失败")
+        try:
+            search = cv2.imread(str(tmpl), cv2.IMREAD_GRAYSCALE)
+            if search is None:
+                return ApiResponse.doError(f"无法读取图片模板: {img_name}")
+            from ha4t.aircv.template import find_template
+            result = find_template(screen, search, threshold=0.8)
+        except Exception:
+            result = None
+        if not result:
+            return ApiResponse.doSuccess({
+                "found": False, "rect": None,
+                "platform_supported": True,
+            })
+        pts = result["rectangle"]  # [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        rect = {"x": min(xs), "y": min(ys), "width": max(xs) - min(xs), "height": max(ys) - min(ys)}
+        return ApiResponse.doSuccess({
+            "found": True, "rect": rect,
+            "platform_supported": True,
+        })
+
+    # ── 普通 selector 元素：走 driver ─────────────────────────────────
+    if 'platforms' in raw:
+        bucket = raw.get('platforms', {}).get(req.platform) or {}
         if not bucket:
             return ApiResponse.doError(f"该元素在 {req.platform} 平台未采集")
         sel = {k: v for k, v in bucket.items() if not k.startswith('_')}
     else:
-        if 'image' in raw:
-            return ApiResponse.doError("image 元素需在设备上手工验证")
         sel = {k: v for k, v in raw.items() if not k.startswith('_')}
-    device = cached_devices.get((req.platform, req.serial))
-    if device is None:
-        return ApiResponse.doError("设备未连接")
     try:
         rect = device.find_element_rect(sel)
     except Exception as e:

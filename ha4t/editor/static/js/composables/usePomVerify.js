@@ -5,8 +5,7 @@ const { ref } = Vue;
 // usePomVerify — POM 元素验证状态（不落盘，纯实时扫描）。
 //
 // results: { name: { status, rect, error } }
-//   status ∈ 'pending' | 'found' | 'not_found' | 'unsupported' | 'manual'
-//   - manual:      image 元素，机器不扫，需在设备上手工验证
+//   status ∈ 'pending' | 'found' | 'not_found' | 'unsupported'
 //   - unsupported: 平台 driver 不暴露元素查找（Harmony）
 // rect 与 hierarchy 同坐标系（pixel space），由 useCanvas 画到截图 overlay。
 export function usePomVerify({ pom, device, msg }) {
@@ -15,10 +14,6 @@ export function usePomVerify({ pom, device, msg }) {
   // 扫描代号：endVerify / 重扫会自增，使在飞的旧串行扫描结果作废，
   // 避免迟到的响应覆盖新一轮扫描或污染已退出的空状态。
   let _scanGen = 0;
-
-  function _isManualOnly(sel) {
-    return sel && typeof sel === 'object' && 'image' in sel;
-  }
 
   // 在验证模式下串行扫指定一批元素，**already-found 项一律保留不动**——
   // 用户语义：一旦某元素曾被定位到，就算后续切了页面找不到了也不刷掉，直到点
@@ -31,15 +26,13 @@ export function usePomVerify({ pom, device, msg }) {
     const serial   = device.serial.value;
     if (!platform || !serial) { msg.warn('设备未连接'); return; }
 
-    // 把待扫元素中尚未 found 的项置 pending；已 found / manual / unsupported 不动。
+    // 把待扫元素中尚未 found 的项置 pending；已 found / unsupported 不动。
     const next = { ...results.value };
     for (const n of names) {
       const sel = pom.elements.value[n];
       if (sel === undefined) continue;                       // 元素已被删
       if (next[n] && next[n].status === 'found') continue;   // 粘性：保留
-      next[n] = _isManualOnly(sel)
-        ? { status: 'manual',  rect: null, error: null }
-        : { status: 'pending', rect: null, error: null };
+      next[n] = { status: 'pending', rect: null, error: null };
     }
     results.value = next;
 
@@ -47,7 +40,6 @@ export function usePomVerify({ pom, device, msg }) {
     for (const name of names) {
       const sel = pom.elements.value[name];
       if (sel === undefined) continue;
-      if (_isManualOnly(sel)) continue;
       // 已 found 的不再发请求 —— 节省 ADB 往返。
       const cur = results.value[name];
       if (cur && cur.status === 'found') continue;
@@ -82,8 +74,9 @@ export function usePomVerify({ pom, device, msg }) {
     // 第一轮先取一次最新截图 + hierarchy，再扫所有元素
     try {
       if (window._screenshotAndDump) await window._screenshotAndDump();
-    } catch (e) { /* 容忍：driver 内部会重试 */ }
-    _scan(Object.keys(pom.elements.value));
+    } catch (e) { /* 截图失败不阻断后续 */ }
+    const all = Object.keys(pom.elements.value);
+    await _scan(all);
   }
 
   // 重扫所有「尚未 found」的元素（not_found / pending / undefined）。
@@ -93,75 +86,66 @@ export function usePomVerify({ pom, device, msg }) {
     const all = Object.keys(pom.elements.value);
     const targets = all.filter(n => {
       const r = results.value[n];
-      return !r || (r.status !== 'found' && r.status !== 'manual' && r.status !== 'unsupported');
+      return !r || (r.status !== 'found' && r.status !== 'unsupported');
     });
     if (!targets.length) {
       msg.success && msg.success('全部已通过');
       return;
     }
-    // 先重新截图 + dump hierarchy —— driver 端拿到当前界面才能准确定位；
-    // 否则后端用上次的 hierarchy 查，看起来"刷新没用"。失败不阻塞扫描。
+    // 每轮刷新前先截一张新图
     try {
       if (window._screenshotAndDump) await window._screenshotAndDump();
-    } catch (e) { /* 截图失败也继续 _scan —— driver 内部还会重试 */ }
-    msg.info && msg.info(`重扫 ${targets.length} 个元素…`);
-    _scan(targets);
+    } catch (e) { /* 截图失败不阻断后续 */ }
+    await _scan(targets);
   }
-
 
   function endVerify() {
     verifyMode.value = false;
-    _scanGen++;          // 作废在飞扫描
     results.value = {};
-    window._pomVerifyHover = '';
+    pom.captureMode.value = true;
   }
 
   // 元素改名 / 改 selector / 删除时的回调：扫一次该元素，不动其它项。
   // （删除场景下 sel 已不在 pom.elements，_scan 会跳过 —— 那就只起到把它从
   // results 里抹掉的副作用，靠下面这两行 prune 显式删掉。）
   function revalidateElement(name) {
+    const next = { ...results.value };
+    delete next[name];
+    results.value = next;
     if (!verifyMode.value) return;
-    // 先把这一项的旧 result 清掉（特别是 sticky-found 的 selector 已变，得让它重判）
-    if (results.value[name]) {
-      const next = { ...results.value };
-      delete next[name];
-      results.value = next;
-    }
-    if (pom.elements.value[name] !== undefined) {
-      _scan([name]);
-    }
+    const sel = pom.elements.value[name];
+    if (!sel) return;
+    _scan([name]);
   }
+
   // ── 单元素临时高亮（持续 N 毫秒，不进入 verify 模式） ─────────────────
   // 列表行的「高亮」按钮调用：调一次后端定位 → 在 canvas overlay 上画 3s 方框，
-  // 不污染 results / verifyMode。 image 元素后端不支持，前端直接拒绝。
+  // 不污染 results / verifyMode。
   let _flashTimer = null;
   async function flashOne(name, sel, durationMs = 3000) {
     if (!sel) { msg.warn('元素 selector 为空'); return; }
-    if (_isManualOnly(sel)) { msg.warn('图像元素需在设备上手工验证'); return; }
     const platform = device.platform.value;
     const serial   = device.serial.value;
     if (!platform || !serial) { msg.warn('设备未连接'); return; }
-
+    let r;
     try {
       const res = await pomVerifySelector({ platform, serial, selector: sel });
-      if (!res.success) { msg.error(res.message || '定位失败'); return; }
-      if (res.data.platform_supported === false) { msg.warn('当前平台不支持元素查找'); return; }
-      if (!res.data.found || !res.data.rect) { msg.warn(`未找到: ${name}`); return; }
-
-      // 直接戳 window 变量（绕过 verifyMode）—— App.js 的 watch 不会清零，因为我们
-      // 没动 verify.results / verifyMode；timer 结束时按当前 verifyMode 还原。
-      const overlay = { [name]: { status: 'found', rect: res.data.rect, error: null } };
-      window._pomVerifyResults = overlay;
-      if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
-
-      clearTimeout(_flashTimer);
-      _flashTimer = setTimeout(() => {
-        window._pomVerifyResults = verifyMode.value ? results.value : null;
+      if (!res.success) { msg.warn(res.message); return; }
+      if (!res.data.found) { msg.warn('未找到该元素'); return; }
+      r = res.data.rect;
+    } catch (e) { msg.warn('查找失败: ' + e.message); return; }
+    // 在全局画 overlay
+    const key = '__flash__';
+    const overlay = { [key]: { status: 'found', rect: r, error: null } };
+    window._pomVerifyResults = overlay;
+    if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
+    clearTimeout(_flashTimer);
+    _flashTimer = setTimeout(() => {
+      if (window._pomVerifyResults === overlay) {
+        window._pomVerifyResults = null;
         if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
-      }, durationMs);
-    } catch (e) {
-      msg.error('高亮失败: ' + (e.message || e));
-    }
+      }
+    }, durationMs);
   }
 
   return { verifyMode, results, beginVerify, endVerify, rescanPending, revalidateElement, flashOne };
