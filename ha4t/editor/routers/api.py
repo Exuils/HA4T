@@ -1098,7 +1098,7 @@ async def ws_run_task(ws: WebSocket):
             cwd=str(TASKS_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
+            text=True, encoding='utf-8', errors='replace',
             env=env,
         )
         # step.index 始终是子 yaml 内的 1-based 序号；前端按 stepOffset 把它换成
@@ -1326,7 +1326,7 @@ async def run_task_allure(filename: str):
                 pass
         result = subprocess.run(
             pytest_cmd,
-            cwd=str(TASKS_DIR), capture_output=True, text=True, env=env,
+            cwd=str(TASKS_DIR), capture_output=True, text=True, encoding='utf-8', errors='replace', env=env,
         )
 
         allure_cmd = shutil.which("allure")
