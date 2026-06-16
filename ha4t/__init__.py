@@ -21,7 +21,7 @@
 - ``ha4t.matchers``  —— OCR / 图像找点（与 Device 解耦的找点策略）
 - ``ha4t.drivers``   —— Android / iOS / Harmony 平台 driver
 
-POM 工程化用法见工作区根目录 ``CLAUDE.md``（编辑器初始化时自动生成）。
+POM 工程化用法见工作区根目录 ``AGENTS.md``（编辑器初始化时自动生成）。
 """
 import os
 from typing import List, Optional

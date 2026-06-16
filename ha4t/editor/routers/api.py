@@ -544,7 +544,7 @@ def _init_workspace(target: Path) -> dict:
         if not dest.exists():
             f.rename(dest)
             created.append(f'testcases/{f.name} (migrated)')
-    # 铺 CLAUDE.md + 根级模板（conftest.py / pyproject.toml / README.md）
+    # 铺 AGENTS.md + 根级模板（conftest.py / pyproject.toml / README.md）
     skills_dir = Path(__file__).parent.parent / 'skills'
     for f in skills_dir.iterdir():
         if f.is_file():

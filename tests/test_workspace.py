@@ -95,7 +95,7 @@ class TestWorkspaceLifecycle(_WsTestBase):
         self.assertTrue((ws_path / "pom" / "_meta.py").exists())
         self.assertTrue((ws_path / "images").is_dir())
         self.assertTrue((ws_path / "screenshots").is_dir())
-        self.assertTrue((ws_path / "CLAUDE.md").exists())
+        self.assertTrue((ws_path / "AGENTS.md").exists())
         self.assertTrue((ws_path / "conftest.py").exists())
         self.assertTrue((ws_path / "pyproject.toml").exists())
         self.assertTrue((ws_path / "README.md").exists())
@@ -149,7 +149,7 @@ class TestWorkspaceLifecycle(_WsTestBase):
         for rel in (
             "pom/__init__.py", "pom/_meta.py",
             "images/.gitkeep", "screenshots/.gitkeep",
-            "CLAUDE.md",
+            "AGENTS.md",
             "conftest.py", "pyproject.toml", "README.md",
         ):
             self.assertTrue((target / rel).exists(), f"missing: {rel}")
