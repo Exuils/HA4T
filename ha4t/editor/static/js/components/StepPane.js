@@ -368,10 +368,10 @@ const TEMPLATE = `
                 <el-tooltip v-if="nodeData.doc" :content="nodeData.doc" placement="top" :show-after="200">
                   <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
                 </el-tooltip>
-                <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)"
+                <el-button size="small"
                     :disabled="!nodeData.sel"
                     @click.stop="verify.flashOne(nodeData.name, nodeData.sel)"
-                    title="高亮 3 秒（仅当前平台 selector 可用时）"><el-icon><View /></el-icon></el-button>
+                    title="高亮 3 秒（截图/selector 上的位置）"><el-icon><View /></el-icon></el-button>
                 <el-button size="small" @click.stop="beginEditElement(nodeData.name, nodeData.sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
                 <el-button size="small" @click.stop="pom.removeElement(nodeData.name)" title="删除（子节点会上升到当前父级）"><el-icon><Close /></el-icon></el-button>
               </div>
