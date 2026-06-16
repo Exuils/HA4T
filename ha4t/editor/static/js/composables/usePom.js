@@ -439,10 +439,14 @@ export function usePom() {
   });
 
   // 拖拽后改父：el-tree node-drop 调用。drop=null 表示升到顶层。
+  // 只改 _parent，不碰 selector，因此只传当前平台 view（或 image），不是整个 ElementShape。
   function setElementParent(name, newParent, msg) {
     if (!Object.prototype.hasOwnProperty.call(elements.value, name)) return false;
+    const el = elements.value[name];
+    const sel = el && el.image ? { image: el.image } : (el.platforms || {})[currentPlatform.value];
+    if (!sel) { _msgError(msg, '该元素在当前平台未采集，无法设置父元素'); return false; }
     return updateElement(
-      name, name, elements.value[name], elementDocs.value[name] || null, newParent || '',
+      name, name, sel, elementDocs.value[name] || null, newParent || '',
       msg,
     );
   }

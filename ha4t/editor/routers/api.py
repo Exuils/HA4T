@@ -5,7 +5,6 @@ import base64
 from io import BytesIO
 import numpy as np
 from PIL import Image as PIL_Image
-import cv2
 import json
 import keyword
 import os
@@ -845,25 +844,31 @@ def pom_verify_selector(req: PomVerifySelectorRequest):
     if device is None:
         return ApiResponse.doError("设备未连接")
 
-    # ── image 元素：截图 + 模板匹配 ──────────────────────────────────
-    if 'image' in raw:
+    # ── image 元素：走 HA4T 运行时相同的模板匹配算法 ─────────────────
+    if raw.get('image'):
         img_name = raw['image']
         tmpl = (IMAGES_DIR / img_name) if IMAGES_DIR else Path(img_name)
         if not tmpl.exists():
             return ApiResponse.doError(f"图片模板不存在: {img_name}")
         try:
             b64 = device.take_screenshot()
-            screen = np.array(PIL_Image.open(BytesIO(base64.b64decode(b64))))
+            screenshot_pil = PIL_Image.open(BytesIO(base64.b64decode(b64)))
         except Exception:
             return ApiResponse.doError("截图失败")
+        # 用 HA4T 的 Template._cv_match，与运行时相同的策略链
+        from ha4t.aircv.cv import Template
+        from ha4t.config import global_config as _GC
+        orig_path = _GC.current_path
+        if IMAGES_DIR:
+            _GC.current_path = str(IMAGES_DIR)
         try:
-            search = cv2.imread(str(tmpl), cv2.IMREAD_GRAYSCALE)
-            if search is None:
-                return ApiResponse.doError(f"无法读取图片模板: {img_name}")
-            from ha4t.aircv.template import find_template
-            result = find_template(screen, search, threshold=0.8)
+            source = np.array(screenshot_pil)
+            tpl = Template(img_name, threshold=0.8)
+            result = tpl._cv_match(source)
         except Exception:
             result = None
+        finally:
+            _GC.current_path = orig_path
         if not result:
             return ApiResponse.doSuccess({
                 "found": False, "rect": None,
