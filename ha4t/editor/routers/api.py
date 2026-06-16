@@ -527,8 +527,6 @@ def _init_workspace(target: Path) -> dict:
     (target / 'pom').mkdir(parents=True, exist_ok=True)
     (target / 'images').mkdir(parents=True, exist_ok=True)
     (target / 'screenshots').mkdir(parents=True, exist_ok=True)
-    (target / 'testcases').mkdir(parents=True, exist_ok=True)
-    (target / '.claude' / 'skills' / 'ha4t-case-writer').mkdir(parents=True, exist_ok=True)
 
     _put('pom/__init__.py', '# -*- coding: utf-8 -*-\n')
     _put('pom/_meta.py', _render_pom_meta({}))
@@ -546,82 +544,11 @@ def _init_workspace(target: Path) -> dict:
         if not dest.exists():
             f.rename(dest)
             created.append(f'testcases/{f.name} (migrated)')
-
-    skill_src = Path(__file__).parent.parent / 'skills' / 'ha4t-case-writer' / 'SKILL.md'
-    if skill_src.exists():
-        _put(
-            '.claude/skills/ha4t-case-writer/SKILL.md',
-            skill_src.read_text(encoding='utf-8'),
-        )
-    claude_src = Path(__file__).parent.parent / 'skills' / 'CLAUDE.md'
-    if claude_src.exists():
-        _put('CLAUDE.md', claude_src.read_text(encoding='utf-8'))
-    _put(
-        'conftest.py',
-        '# -*- coding: utf-8 -*-\n'
-        'import os\n'
-        'import sys\n'
-        'from ha4t.config import global_config\n'
-        '\n'
-        '# 工作区根入 sys.path —— 用例在 testcases/ 下仍可 `from pom import ...`\n'
-        '_WS_ROOT = os.path.dirname(os.path.abspath(__file__))\n'
-        'if _WS_ROOT not in sys.path:\n'
-        '    sys.path.insert(0, _WS_ROOT)\n'
-        '\n'
-        'def pytest_configure(config):\n'
-        '    global_config.current_path = os.path.join(_WS_ROOT, "images")\n',
-    )
-
-    _put(
-        'pyproject.toml',
-        '[project]\n'
-        'name = "ha4t-cases"\n'
-        'version = "0.1.0"\n'
-        'description = "HA4T automation test cases workspace"\n'
-        'requires-python = ">=3.10"\n'
-        'dependencies = [\n'
-        '    "ha4t",\n'
-        ']\n'
-        '\n'
-        '[tool.pytest.ini_options]\n'
-        'testpaths = ["testcases"]\n',
-    )
-
-    _put(
-        'README.md',
-        '# HA4T 用例工作区\n'
-        '\n'
-        '本目录由 HA4T 编辑器初始化，作为测试用例的独立工程；HA4T 作为依赖库使用。\n'
-        '\n'
-        '## 安装依赖\n'
-        '```\n'
-        'uv sync          # 或：pip install -U ha4t\n'
-        '```\n'
-        '\n'
-        '## 目录\n'
-        '- `pom/`         Page Object 元素库（编辑器「POM 采集」维护，勿手改 `__init__.py`）\n'
-        '- `images/`      模板图片（`dev.click(image="x.png")` 按裸名解析到此目录）\n'
-        '- `screenshots/` POM 图像元素裁剪源\n'
-        '- `testcases/`   测试用例（.py，编辑器新建用例落在此目录）\n'
-        '\n'
-        '## 用例写法\n'
-        '```python\n'
-        'from ha4t import connect\n'
-        'from pom import 登录页, VARS          # 只 import 用到的 page + 全局 VARS\n'
-        '\n'
-        'LOCAL_VARS = {"username": "tester"}   # 本用例特有常量（编辑器自动识别渲染）\n'
-        '\n'
-        'dev = connect(platform="android", device_serial="")\n'
-        'dev.start_app(VARS["package"])\n'
-        'dev.click(登录页.ELEMENTS["登录按钮"])   # 注意：传 Selector 对象，不带 **\n'
-        '```\n'
-        '- ELEMENTS 值是 Selector 对象，自带跨平台分桶（android/ios/harmony） + image\n'
-        '- 直接 dev.click(ELEMENTS["x"])（不带 **），平台由 connect() 决定\n'
-        '- 全局常量 → POM 编辑器「全局 VARS」（写入 `pom/_meta.py`，代码 `VARS["key"]`）\n'
-        '- 用例常量 → 顶层 `LOCAL_VARS = {...}`（代码 `LOCAL_VARS["key"]`）\n'
-        '\n'
-        '详见 `.claude/skills/ha4t-case-writer/SKILL.md`。\n',
-    )
+    # 铺 CLAUDE.md + 根级模板（conftest.py / pyproject.toml / README.md）
+    skills_dir = Path(__file__).parent.parent / 'skills'
+    for f in skills_dir.iterdir():
+        if f.is_file():
+            _put(f.name, f.read_text(encoding='utf-8'))
 
     return {"created": created}
 
@@ -891,20 +818,6 @@ def pom_save_meta(req: PomMetaSaveRequest):
     meta_f = _pom_dir() / '_meta.py'
     meta_f.write_text(_render_pom_meta(req.vars), encoding='utf-8')
     return ApiResponse.doSuccess({"saved": True})
-
-
-@router.post("/pom/install-skill", response_model=ApiResponse)
-def pom_install_skill():
-    if TASKS_DIR is None:
-        return _no_ws()
-    src = Path(__file__).parent.parent / 'skills' / 'ha4t-case-writer' / 'SKILL.md'
-    if not src.exists():
-        return ApiResponse.doError("skill 模板缺失")
-    dst = TASKS_DIR / '.claude' / 'skills' / 'ha4t-case-writer' / 'SKILL.md'
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(src, dst)
-    return ApiResponse.doSuccess({"path": str(dst)})
-
 
 class PomVerifySelectorRequest(BaseModel):
     platform: str

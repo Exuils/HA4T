@@ -1,0 +1,11 @@
+[project]
+name = "ha4t-cases"
+version = "0.1.0"
+description = "HA4T automation test cases workspace"
+requires-python = ">=3.10"
+dependencies = [
+    "ha4t",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["testcases"]

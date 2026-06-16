@@ -199,12 +199,6 @@ export async function pomSaveMeta(payload) {
   return checkResponse(response);
 }
 
-export async function pomInstallSkill() {
-  const response = await fetch(`${API_HOST}pom/install-skill`, {
-    method: 'POST'
-  });
-  return checkResponse(response);
-}
 
 export async function pomVerifySelector(payload) {
   const response = await fetch(`${API_HOST}pom/verify-selector`, {

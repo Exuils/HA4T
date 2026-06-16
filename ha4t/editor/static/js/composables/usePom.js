@@ -1,6 +1,6 @@
 import {
   pomListPages, pomGetPage, pomSavePage, pomDeletePage,
-  pomGetMeta, pomSaveMeta, pomInstallSkill,
+  pomGetMeta, pomSaveMeta,
   getImage, saveImage,
 } from '../api.js';
 import { selectorFromNode } from './useTask.js';
@@ -447,14 +447,6 @@ export function usePom() {
     );
   }
 
-  async function installSkill(msg) {
-    try {
-      const res = await pomInstallSkill();
-      if (!res.success) { _msgError(msg, res.message || '安装失败'); return; }
-      msg && msg.success && msg.success(`Skill 已安装: ${res.data.path}`);
-    } catch (e) { _msgError(msg, '安装错误: ' + e.message); }
-  }
-
   return {
     // state
     pages, currentFile, page, desc, triggers, elements, elementDocs, elementParents,
@@ -468,7 +460,7 @@ export function usePom() {
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,
     loadMeta, saveMeta,
     beginCapture, beginImageCapture, setPendingSelectorField, confirmCapture,
-    updateElement, removeElement, setElementParent, installSkill,
+    updateElement, removeElement, setElementParent,
     selectorView, hasSelectorOn,
   };
 }

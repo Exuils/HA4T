@@ -276,7 +276,6 @@ const TEMPLATE = `
             title="查看 pom/&lt;page&gt;.py 源码（只读）">
           <el-icon><Reading /></el-icon>
         </el-button>
-        <el-button size="small" @click="pom.installSkill(msg)">装 Skill</el-button>
       </div>
 
       <!-- 平台 tab —— 显示当前平台分桶；切换只换显示，不动数据 -->

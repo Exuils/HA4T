@@ -95,7 +95,7 @@ class TestWorkspaceLifecycle(_WsTestBase):
         self.assertTrue((ws_path / "pom" / "_meta.py").exists())
         self.assertTrue((ws_path / "images").is_dir())
         self.assertTrue((ws_path / "screenshots").is_dir())
-        self.assertTrue((ws_path / ".claude" / "skills" / "ha4t-case-writer" / "SKILL.md").exists())
+        self.assertTrue((ws_path / "CLAUDE.md").exists())
         self.assertTrue((ws_path / "conftest.py").exists())
         self.assertTrue((ws_path / "pyproject.toml").exists())
         self.assertTrue((ws_path / "README.md").exists())
@@ -149,7 +149,7 @@ class TestWorkspaceLifecycle(_WsTestBase):
         for rel in (
             "pom/__init__.py", "pom/_meta.py",
             "images/.gitkeep", "screenshots/.gitkeep",
-            ".claude/skills/ha4t-case-writer/SKILL.md",
+            "CLAUDE.md",
             "conftest.py", "pyproject.toml", "README.md",
         ):
             self.assertTrue((target / rel).exists(), f"missing: {rel}")
@@ -215,9 +215,6 @@ class TestNoWorkspaceGuard(_WsTestBase):
 
     def test_pom_get_meta_guarded(self):
         self._err(self.client.get("/pom/meta"))
-
-    def test_pom_install_skill_guarded(self):
-        self._err(self.client.post("/pom/install-skill"))
 
     def test_open_folder_guarded(self):
         self._err(self.client.post("/tasks/open-folder"))

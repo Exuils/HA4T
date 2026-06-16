@@ -495,32 +495,6 @@ class TestPomEndpoints(unittest.TestCase):
         self.assertEqual(pom_pkg.VARS["package"], "com.x")
         self.assertEqual(pom_pkg.VARS["g"], 1)
 
-
-class TestPomInstallSkill(unittest.TestCase):
-    """install-skill 端点把打包的 SKILL.md 拷到 <tasks_dir>/.claude/skills/。"""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ha4t_skill_test_")
-        self._patcher = patch.object(api_module, "TASKS_DIR", Path(self.tmp))
-        self._patcher.start()
-        self.app = FastAPI()
-        self.app.include_router(router)
-        self.client = TestClient(self.app)
-
-    def tearDown(self):
-        self._patcher.stop()
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_install_copies_skill(self):
-        resp = self.client.post("/pom/install-skill")
-        body = resp.json()
-        self.assertTrue(body["success"], body.get("message"))
-        dst = Path(self.tmp) / ".claude" / "skills" / "ha4t-case-writer" / "SKILL.md"
-        self.assertTrue(dst.exists())
-        text = dst.read_text(encoding="utf-8")
-        self.assertIn("name: ha4t-case-writer", text)
-
-
 class TestPomVerifySelector(unittest.TestCase):
     """verify-selector 端点：image 拦截、空 selector、设备缺失、mock 设备命中/未命中。
 
