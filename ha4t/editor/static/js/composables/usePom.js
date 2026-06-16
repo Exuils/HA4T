@@ -231,10 +231,12 @@ export function usePom() {
     imageCache.value = { ...imageCache.value, [filename]: dataUrl };
     pendingSelector.value = { image: filename };
     if (pendingFillName.value) {
+      // 补全模式：跳过命名弹框，直接替换——原名 + 保留层级
       pendingName.value = pendingFillName.value;
-    } else {
-      pendingName.value = '';
+      confirmCapture();
+      return;
     }
+    pendingName.value = '';
     pendingDoc.value = '';
     pendingParent.value = '';
     nameDialogVisible.value = true;
