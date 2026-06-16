@@ -134,9 +134,8 @@ export function usePomVerify({ pom, device, msg }) {
       if (!res.data.found) { msg.warn('未找到该元素'); return; }
       r = res.data.rect;
     } catch (e) { msg.warn('查找失败: ' + e.message); return; }
-    // 在全局画 overlay
-    const key = '__flash__';
-    const overlay = { [key]: { status: 'found', rect: r, error: null } };
+    // 在全局画 overlay，用元素名作为 key —— canvas 会渲染在方框标签里
+    const overlay = { [name]: { status: 'found', rect: r, error: null } };
     window._pomVerifyResults = overlay;
     if (window._renderHierarchyCanvas) window._renderHierarchyCanvas();
     clearTimeout(_flashTimer);
