@@ -215,10 +215,25 @@ export function usePom() {
   // Image capture entry: useCanvas calls this from onCaptureMouseUp when pom
   // is the active capture target. `dataUrl` is the cropped PNG; `filename`
   // has been written to <images_dir>/ already so reloading the page renders it.
+
+  // 把已有元素转为图像定位：设 pendingFillName → 进采集模式 → 框选后自动填入。
+  function fillImageOnElement(name) {
+    if (!Object.prototype.hasOwnProperty.call(elements.value, name)) return;
+    pendingFillName.value = name;
+    pendingName.value = name;
+    pendingDoc.value = elementDocs.value[name] || '';
+    pendingParent.value = elementParents.value[name] || '';
+    captureMode.value = true;
+  }
+  
   function beginImageCapture(filename, dataUrl) {
     imageCache.value = { ...imageCache.value, [filename]: dataUrl };
     pendingSelector.value = { image: filename };
-    pendingName.value = '';   // 图像元素无现成名字来源，用户必填
+    if (pendingFillName.value) {
+      pendingName.value = pendingFillName.value;
+    } else {
+      pendingName.value = '';
+    }
     pendingDoc.value = '';
     pendingParent.value = '';
     nameDialogVisible.value = true;
@@ -264,18 +279,34 @@ export function usePom() {
       _msgError(msg, '元素名不能为空，且不可包含换行、制表符或其它控制字符');
       return;
     }
-    if (Object.prototype.hasOwnProperty.call(elements.value, name)) {
-      _msgError(msg, '名称已存在');
-      return;
-    }
     const selector = _normalizeSelector(pendingSelector.value);
     if (Object.keys(selector).length === 0) {
       _msgError(msg, 'selector 不能为空 — 至少保留一个字段');
       return;
     }
-    // 包成 ElementShape：image 元素跨平台共享，其它进 currentPlatform 分桶
     const par = (pendingParent.value || '').trim();
     const doc = (pendingDoc.value || '').trim();
+
+    // ── 补全模式：更新已有元素（转为图像定位） ──────────────────────
+    const fillTarget = pendingFillName.value;
+    if (fillTarget) {
+      pendingFillName.value = '';
+      const ok = updateElement(fillTarget, name, selector, doc, par, msg);
+      if (!ok) return;
+      nameDialogVisible.value = false;
+      pendingSelector.value = null;
+      pendingName.value = '';
+      pendingDoc.value = '';
+      pendingParent.value = '';
+      return;
+    }
+
+    // ── 新建模式 ────────────────────────────────────────────────────
+    if (Object.prototype.hasOwnProperty.call(elements.value, name)) {
+      _msgError(msg, '名称已存在');
+      return;
+    }
+    // 包成 ElementShape
     let element;
     if (selector.image) {
       element = { platforms: {}, image: selector.image, _parent: par, _doc: doc };
@@ -463,6 +494,7 @@ export function usePom() {
     // methods
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,
     loadMeta, saveMeta,
+    fillImageOnElement,
     beginCapture, beginImageCapture, setPendingSelectorField, confirmCapture,
     updateElement, removeElement, setElementParent,
     selectorView, hasSelectorOn,

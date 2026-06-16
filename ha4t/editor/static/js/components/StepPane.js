@@ -361,14 +361,17 @@ const TEMPLATE = `
                 </template>
                 <template v-if="verify.verifyMode.value">
                   <el-icon v-if="statusOf(nodeData.name) === 'pending'" class="is-loading" style="flex-shrink:0"><Loading /></el-icon>
-                  <span v-else-if="statusOf(nodeData.name) === 'manual'" class="pom-el-status-tag tag-manual">需手工</span>
-                  <span v-else-if="statusOf(nodeData.name) === 'unsupported'" class="pom-el-status-tag tag-unsupported">平台不支持</span>
                   <span v-else-if="statusOf(nodeData.name) === 'not_found'" class="pom-el-status-tag tag-notfound"
                       :title="(verify.results.value[nodeData.name] && verify.results.value[nodeData.name].error) || ''">未找到</span>
+                  <span v-else-if="statusOf(nodeData.name) === 'unsupported'" class="pom-el-status-tag tag-unsupported">平台不支持</span>
                 </template>
                 <el-tooltip v-if="nodeData.doc" :content="nodeData.doc" placement="top" :show-after="200">
                   <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
                 </el-tooltip>
+                <el-button size="small" v-if="nodeData.sel && !nodeData.sel.image"
+                    :disabled="!pom.captureMode.value"
+                    @click.stop="pom.fillImageOnElement(nodeData.name)"
+                    title="转为图像定位 — 框选截图区域替换当前 selector"><el-icon><Picture /></el-icon></el-button>
                 <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)"
                     :disabled="!nodeData.sel"
                     @click.stop="verify.flashOne(nodeData.name, nodeData.sel)"
