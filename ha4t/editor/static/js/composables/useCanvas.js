@@ -308,6 +308,12 @@ export function useCanvas({ device, task, runner, msg, pom }) {
     if (rect) await createImageStep(rect);
     device.captureStart.value = null; device.captureRect.value = null;
   }
+  function onKeyDown(e) {
+    if (e.key === 'Escape' && device.captureMode.value) {
+      device.exitCaptureMode();
+      if (window._pomCancelCapture) window._pomCancelCapture();
+    }
+  }
   function clampCaptureRect(raw) {
     const canvas = document.querySelector('#hierarchyCanvas');
     if (!canvas) return raw;
@@ -391,6 +397,7 @@ export function useCanvas({ device, task, runner, msg, pom }) {
     canvas.addEventListener('mousedown', onCaptureMouseDown);
     canvas.addEventListener('mousemove', onCaptureMouseMove);
     canvas.addEventListener('mouseup', onCaptureMouseUp);
+    document.addEventListener('keydown', onKeyDown);
     canvas.addEventListener('click', onSwipeClick);
 
     // Cross-component bridges (see header comment)
