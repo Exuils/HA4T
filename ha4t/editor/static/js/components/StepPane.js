@@ -429,6 +429,10 @@ const TEMPLATE = `
                   <el-button size="small" type="primary" @click="commitEditElement(nodeData.name)">保存</el-button>
                 </div>
               </div>
+            </div>
+          </template>
+        </el-tree>
+          </div>
       <div class="drawer-header" @click="globalVarsOpen = !globalVarsOpen">
         <span>全局 VARS <span class="drawer-count" v-if="Object.keys(pom.metaVars.value).length">({{ Object.keys(pom.metaVars.value).length }})</span></span>
         <el-tooltip placement="top">
@@ -955,6 +959,7 @@ export default {
     }
     function convertToImageFromEdit(name) {
       pom.fillImageOnElement(name, editingDoc.value, editingParent.value);
+      device.captureMode.value = true;   // 触发 canvas 框选模式
       cancelEditElement();
     }
     function commitEditElement(oldName) {

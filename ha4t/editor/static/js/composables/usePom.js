@@ -239,6 +239,12 @@ export function usePom() {
     pendingParent.value = '';
     nameDialogVisible.value = true;
   }
+  
+  // 取消当前待采集：清理 pendingFillName，避免污染后续操作。
+  function cancelCapture() {
+    pendingFillName.value = '';
+    nameDialogVisible.value = false;
+  }
 
   // Mutate one field of the pending selector inside the capture dialog.
   // Empty/null values are stored and stripped when the user confirms — keeps
@@ -495,7 +501,7 @@ export function usePom() {
     // methods
     loadPages, selectPage, createPage, deletePage, saveCurrentPage,
     loadMeta, saveMeta,
-    fillImageOnElement,
+    fillImageOnElement, cancelCapture,
     beginCapture, beginImageCapture, setPendingSelectorField, confirmCapture,
     updateElement, removeElement, setElementParent,
     selectorView, hasSelectorOn,
