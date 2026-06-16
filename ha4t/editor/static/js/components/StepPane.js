@@ -1179,7 +1179,7 @@ export default {
       // pom
       SELECTOR_KEYS, SELECTOR_LABELS,
       editingElementName, editingName, editingSelector, editingDoc, editingParent,
-      formatSelector, beginEditElement, cancelEditElement, commitEditElement,
+      formatSelector, beginEditElement, cancelEditElement, convertToImageFromEdit, commitEditElement,
       parentOptions, allowPomDrop, onPomNodeDrop,
       canDragNow, armDrag,
       onSelectPage, onDeletePage,
