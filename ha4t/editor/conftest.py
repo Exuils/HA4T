@@ -55,6 +55,13 @@ def _extract_meta(content: str) -> dict:
 def _split_preamble_and_steps(content: str):
     """
     将任务文件拆分为前置代码块和步骤列表。
+
+    步骤分割规则：
+    - ``# --step--`` 显式步骤标记，后续同级缩进行为步骤代码
+    - 同级缩进（column 0）的可执行代码触发隐式步骤分割
+    - 更深缩进（column > 0）的代码始终属于当前步骤
+    - 前置代码：所有步骤之前的代码
+
     返回 (preamble_lines, [(remark, code), ...])
     """
     lines = content.split('\n')
@@ -67,20 +74,40 @@ def _split_preamble_and_steps(content: str):
 
     for line in lines:
         stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+
+        if not stripped:
+            # 空行保留在当前步骤 / 前置代码，不触发隐式分割
+            if in_step:
+                buf.append('')
+            else:
+                preamble.append('')
+            continue
+
         if stripped.startswith(step_marker):
             if in_step and buf:
                 steps.append((remark, '\n'.join(buf).strip()))
                 buf = []
                 remark = ''
             in_step = True
-            # 提取 # --step-- 后面的备注文本
             remark = stripped[len(step_marker):].strip()
             continue
-        if in_step:
-            if stripped and not stripped.startswith('#'):
-                buf.append(line)
-        else:
+
+        if stripped.startswith('#'):
+            if not in_step:
+                preamble.append(line)
+            continue
+
+        if not in_step:
             preamble.append(line)
+            continue
+
+        if indent == 0:
+            if buf:
+                steps.append((remark, '\n'.join(buf).strip()))
+                buf = []
+                remark = ''
+        buf.append(line)
 
     if in_step and buf:
         steps.append((remark, '\n'.join(buf).strip()))

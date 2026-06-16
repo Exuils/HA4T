@@ -88,22 +88,22 @@ class AndroidDriver(BaseDriver):
     def push_file(self, local_path: str, remote_path: str) -> None:
         serial = self._d.adb_device.serial
         subprocess.run(
-            f"adb -s {serial} push {local_path} {remote_path}",
-            shell=True, check=True
+            ["adb", "-s", serial, "push", local_path, remote_path],
+            check=True
         )
 
     def pull_file(self, remote_path: str, local_path: str) -> None:
         serial = self._d.adb_device.serial
         subprocess.run(
-            f"adb -s {serial} pull {remote_path} {local_path}",
-            shell=True, check=True
+            ["adb", "-s", serial, "pull", remote_path, local_path],
+            check=True
         )
 
     def delete_file(self, remote_path: str) -> None:
         serial = self._d.adb_device.serial
         subprocess.run(
-            f"adb -s {serial} shell rm -r {remote_path}",
-            shell=True, check=True
+            ["adb", "-s", serial, "shell", "rm", "-r", remote_path],
+            check=True
         )
 
     # ── 暴露底层 driver（供 cdp 等需要 adb_device 的模块使用） ──
