@@ -36,8 +36,34 @@ dev.wait(首页.ELEMENTS["首页加载完成"], timeout=10)
 - 临时定位**不修改 pom/ 文件**，仅当前用例有效
 - 全局变量 → `VARS["key"]`；用例特有 → `LOCAL_VARS["key"]`
 - 复用用例 → `include("other_case.py")`
+  
+## HA4T Device API 速查
 
-可用 Device API 见 `ha4t/__init__.py` 模块文档或 `from ha4t import Device` 类型签名。
+| 方法 | 说明 | 关键参数 |
+|------|------|---------|
+| `dev.click(sel)` | 点击元素 | `sel`: Selector / canonical kwargs / 比例坐标 `(0.5, 0.5)` |
+| `dev.double_click(sel)` | 双击 | `interval`: 0.05 |
+| `dev.long_press(sel)` | 长按 | `duration`: 1.0 |
+| `dev.swipe(p1, p2)` | 滑动（像素或比例） | `p1/p2`: `(x, y)`，可选 `duration`/`steps` |
+| `dev.swipe_up/down/left/right()` | 方向滑动 | 可选 `duration`/`steps` |
+| `dev.drag(sel, dx, dy)` | 拖拽偏移 | `dx/dy`: 像素值 |
+| `dev.key(key_name)` | 系统按键 | `"back"`, `"home"`, `"menu"` 等 |
+| `dev.home()` | Home 键 | — |
+| `dev.exists(sel)` | 元素是否存在 | 返回 `bool`，不抛错 |
+| `dev.wait(sel, timeout)` | 等待元素出现/消失 | `reverse=True` 等消失；`timeout` 默认 `global_config.find_timeout` |
+| `dev.get_text(sel)` | 取元素文本 | — |
+| `dev.get_page_text()` | OCR 识别全页文字 | — |
+| `dev.assert_element(sel, operator, expected)` | 断言 | `operator`: eq/ne/contains/not_contains/empty/regex/exists_true/exists_false；`extract`: text（默认）/exists |
+| `dev.start_app(pkg)` | 启动应用 | 可选 `activity`；默认从 `config` 取 |
+| `dev.stop_app(pkg)` | 停止应用 | — |
+| `dev.restart_app(pkg)` | 重启应用 | 底层 stop + start |
+| `dev.get_current_app()` | 当前前台应用包名 | — |
+| `dev.clear_app(pkg)` | 清除数据（仅 Android） | — |
+| `dev.pull_file(src, dst)` | 从设备拉文件 | `src` 设备路径 / `dst` 本地路径 |
+| `dev.upload_files(local)` | 上传文件/夹到 `/sdcard/` | — |
+| `dev.delete_file(path)` | 删除设备文件 | — |
+| `time.sleep(secs)` | 等待 | Python 标准库 |
+| `include("case.py")` | 内联执行另一个用例 | 被引用文件在 `testcases/` 下 |
 
 ## 缺失元素时的交互
 
