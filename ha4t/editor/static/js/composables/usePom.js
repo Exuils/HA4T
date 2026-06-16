@@ -217,12 +217,13 @@ export function usePom() {
   // has been written to <images_dir>/ already so reloading the page renders it.
 
   // 把已有元素转为图像定位：设 pendingFillName → 进采集模式 → 框选后自动填入。
-  function fillImageOnElement(name) {
+  // doc / parent 可选：由编辑对话框准备好再传入，保留编辑状态的修改。
+  function fillImageOnElement(name, doc, parent) {
     if (!Object.prototype.hasOwnProperty.call(elements.value, name)) return;
     pendingFillName.value = name;
     pendingName.value = name;
-    pendingDoc.value = elementDocs.value[name] || '';
-    pendingParent.value = elementParents.value[name] || '';
+    pendingDoc.value = doc !== undefined ? doc : (elementDocs.value[name] || '');
+    pendingParent.value = parent !== undefined ? parent : (elementParents.value[name] || '');
     captureMode.value = true;
   }
   

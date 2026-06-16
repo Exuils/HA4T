@@ -368,10 +368,6 @@ const TEMPLATE = `
                 <el-tooltip v-if="nodeData.doc" :content="nodeData.doc" placement="top" :show-after="200">
                   <el-icon class="pom-el-doc-icon" style="flex-shrink:0;color:var(--fg-2);cursor:help"><InfoFilled /></el-icon>
                 </el-tooltip>
-                <el-button size="small" v-if="nodeData.sel && !nodeData.sel.image"
-                    :disabled="!pom.captureMode.value"
-                    @click.stop="pom.fillImageOnElement(nodeData.name)"
-                    title="转为图像定位 — 框选截图区域替换当前 selector"><el-icon><Picture /></el-icon></el-button>
                 <el-button size="small" v-if="!(nodeData.sel && nodeData.sel.image)"
                     :disabled="!nodeData.sel"
                     @click.stop="verify.flashOne(nodeData.name, nodeData.sel)"
@@ -379,6 +375,7 @@ const TEMPLATE = `
                 <el-button size="small" @click.stop="beginEditElement(nodeData.name, nodeData.sel)" title="编辑"><el-icon><Edit /></el-icon></el-button>
                 <el-button size="small" @click.stop="pom.removeElement(nodeData.name)" title="删除（子节点会上升到当前父级）"><el-icon><Close /></el-icon></el-button>
               </div>
+              <!-- ── 编辑状态 ── -->
               <div class="pom-el-edit" v-else>
                 <div class="prop-row" style="margin-bottom:4px">
                   <label class="prop-label">名称</label>
@@ -386,7 +383,7 @@ const TEMPLATE = `
                 </div>
                 <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
                   <label class="prop-label" style="padding-top:5px">说明</label>
-                  <el-input v-model="editingDoc" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明，落到 .py 上方的 # 注释"></el-input>
+                  <el-input v-model="editingDoc" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" placeholder="可选 — 给 AI / 阅读者的元素说明"></el-input>
                 </div>
                 <div class="prop-row" style="margin-bottom:4px">
                   <label class="prop-label">父元素</label>
@@ -399,6 +396,15 @@ const TEMPLATE = `
                       :value="opt"
                     ></el-option>
                   </el-select>
+                </div>
+                <!-- 框选图像入口：编辑状态下把当前元素转为图像定位 -->
+                <div class="prop-row" style="margin-bottom:4px">
+                  <label class="prop-label"></label>
+                  <el-button size="small" type="warning"
+                      :disabled="!pom.captureMode.value"
+                      @click="convertToImageFromEdit(nodeData.name)"
+                      title="框选截图区域替换为图像定位">📷 框选图像</el-button>
+                  <span style="font-size:11px;color:var(--fg-2);margin-left:6px">如果当前定位不好用，转为图像</span>
                 </div>
                 <template v-if="editingSelector.image">
                   <div class="prop-row" style="margin-bottom:4px;align-items:flex-start">
@@ -423,15 +429,6 @@ const TEMPLATE = `
                   <el-button size="small" type="primary" @click="commitEditElement(nodeData.name)">保存</el-button>
                 </div>
               </div>
-            </div>
-          </template>
-        </el-tree>
-      </div>
-      <div class="prop-empty" v-else>在上方工具栏选择或新建 Page</div>
-    </div>
-
-    <!-- 下：全局 VARS 抽屉（log-panel 风格）-->
-    <div class="drawer-panel" :class="{ 'drawer-open': globalVarsOpen }">
       <div class="drawer-header" @click="globalVarsOpen = !globalVarsOpen">
         <span>全局 VARS <span class="drawer-count" v-if="Object.keys(pom.metaVars.value).length">({{ Object.keys(pom.metaVars.value).length }})</span></span>
         <el-tooltip placement="top">
@@ -955,6 +952,10 @@ export default {
       editingSelector.value = {};
       editingDoc.value = '';
       editingParent.value = '';
+    }
+    function convertToImageFromEdit(name) {
+      pom.fillImageOnElement(name, editingDoc.value, editingParent.value);
+      cancelEditElement();
     }
     function commitEditElement(oldName) {
       const ok = pom.updateElement(
