@@ -300,6 +300,7 @@ export function useTask() {
       if (line.startsWith('# severity:'))    { severity = line.split(':')[1].trim(); continue; }
       if (line.startsWith('# rerun:'))       { rerun    = parseInt(line.split(':')[1].trim()) || 0; continue; }
       const trimmed = line.trim();
+      const indent = line.length - line.trimLeft().length;
       if (trimmed.startsWith('# --step--')) {
         if (inStep && stepBuf.length) {
           const s = parseStepCode(stepBuf.join('\n'));
@@ -314,6 +315,12 @@ export function useTask() {
       if (inStep) {
         const t = line.trim();
         if (t && !t.startsWith('#') && !t.startsWith('from ') && !t.startsWith('connect(') && !t.startsWith('import ') && !t.startsWith('os.environ') && !/^\w+\s*=\s*connect\(/.test(t)) {
+          if (indent === 0 && stepBuf.length) {
+            const s = parseStepCode(stepBuf.join('\n'));
+            if (remark) s.remark = remark;
+            parsedSteps.push(s);
+            stepBuf = []; remark = '';
+          }
           stepBuf.push(line);
         }
       } else if (inExtra && line.trim()) {
