@@ -553,7 +553,34 @@ def _init_workspace(target: Path) -> dict:
             '.claude/skills/ha4t-case-writer/SKILL.md',
             skill_src.read_text(encoding='utf-8'),
         )
-
+    _put(
+        'CLAUDE.md',
+        '# HA4T 测试工作区 AI 行为规则\n'
+        '\n'
+        '语言：中文\n'
+        '\n'
+        '## 测试用例生成\n'
+        '\n'
+        '- 用例生成遵循 `.claude/skills/ha4t-case-writer/SKILL.md` 中的技术规则\n'
+        '- POM 元素只能引用 `ELEMENTS` 中已经存在的，禁止新建/修改/删除 pom/ 文件\n'
+        '- 禁止猜测 resourceId / text / xpath 等 locator 值——只有编辑器采集才能拿到真实值\n'
+        '\n'
+        '## 缺失元素时的交互\n'
+        '\n'
+        '当流程需要的元素在 POM 中不存在时：\n'
+        '\n'
+        '1. 输出缺失清单，每项格式：`{page名} | {建议元素名} | {用途} | {需要平台}`\n'
+        '2. 引导用户到编辑器采集，话术模板：\n'
+        '   - *"请在 HA4T 编辑器中打开「{page}」页面，使用左上角手柄的采集模式，在屏幕上框选对应的元素，保存后告诉我重试。"*\n'
+        '   - *"如果只是缺少 {platform} 平台的分桶，请切换到该设备后重新采集。"*\n'
+        '3. 不要用临时定位（`dev.click(text="...")`）来绕过缺失——这大概率是错的\n'
+        '4. 输出清单和引导后停止，等用户补采后重试\n'
+        '\n'
+        '## 通用规则\n'
+        '\n'
+        '- 用例是纯 Python 脚本，可自由使用 Python 标准库（time / json / csv / 循环 / 条件 / 数据结构）\n'
+        '- 与用户交互时，给出具体可操作的下一步指令，不只是报错\n',
+    )
     _put(
         'conftest.py',
         '# -*- coding: utf-8 -*-\n'
