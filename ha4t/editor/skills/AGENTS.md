@@ -35,6 +35,7 @@ dev.wait(首页.ELEMENTS["首页加载完成"], timeout=10)
 - 临时定位**不修改 pom/ 文件**，仅当前用例有效
 - 全局变量 → `VARS["key"]`；用例特有 → `LOCAL_VARS["key"]`
 - 复用用例 → `include("other_case.py")`
+- **少即是多**：用户说写到哪一步就只写哪一步。不要替用户做取舍、补全没问的流程、或者假设后面的步骤
 
 ## Device 对象结构
 
