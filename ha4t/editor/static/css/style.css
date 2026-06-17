@@ -85,6 +85,15 @@ body, html {
   overflow: hidden;
 }
 
+/* ── Tab content stack — CSS Grid: all children stack in same cell ── */
+.tab-stack {
+  flex: 1; display: grid; overflow: hidden;
+}
+.tab-stack > * {
+  grid-row: 1; grid-column: 1; min-height: 0;
+}
+
+
 /* ── Inspector (right) — single pane with 3 mutually-exclusive tabs ── */
 .right {
   grid-area: right;
@@ -537,19 +546,14 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 }
 .pom-el-preview {
   max-width: 100%; max-height: 200px; object-fit: contain;
-  background: #1a1a1a; border: 1px solid var(--bd); border-radius: 3px;
-  display: block;
 }
 
-/* ── 「编辑器」面板（grid-area: center）外层 tab 切换 ─────── */
 .case-edit-region {
-  flex: 1; min-height: 0;
   display: flex; flex-direction: column; overflow: hidden;
 }
 
 /* ── POM 采集面板（StepPane 的 outer tab） — 上/中/下三段 ─── */
 .pom-pane {
-  flex: 1; min-height: 0;
   display: flex; flex-direction: column; overflow: hidden;
 }
 .pom-pane-header {
@@ -840,8 +844,7 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
 
 /* ── Allure 报告 tab ────────────────────────────────────────────── */
 .allure-pane {
-  display: flex; flex-direction: column;
-  height: 100%; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; height: 100%;
 }
 .allure-toolbar {
   display: flex; align-items: center; gap: 8px;
@@ -904,4 +907,159 @@ html.dark .el-popper.is-light { background: var(--bg-1) !important; border-color
   border-radius: 3px;
   background: var(--bd);
   margin-left: 4px;
+}
+
+/* ── 性能监控 tab ──────────────────────────────────────────── */
+.perf-pane {
+  display: flex; flex-direction: column; overflow: hidden; height: 100%;
+}
+.perf-sub-tabs {
+  display: flex; flex-shrink: 0;
+  border-bottom: 1px solid var(--bd);
+}
+.perf-sub-tab {
+  padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--fg-2);
+  background: none; border: none; border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+}
+.perf-sub-tab:hover { color: var(--fg); }
+.perf-sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.perf-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+.perf-toolbar-title { font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; }
+.perf-toolbar-hint  { font-size: 11px; color: var(--fg-2); white-space: nowrap; }
+.perf-toolbar-recording {
+  font-size: 11px; color: #f56c6c; font-weight: 600; white-space: nowrap;
+  animation: perf-pulse 1.2s ease-in-out infinite;
+}
+@keyframes perf-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+.perf-label {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 12px; color: var(--fg); cursor: pointer; white-space: nowrap;
+}
+.perf-label.disabled { opacity: 0.5; pointer-events: none; }
+.perf-label input { margin: 0; }
+
+.perf-pkg-select { width: 140px; }
+.perf-interval { width: 60px; }
+
+.perf-btn {
+  height: 28px; padding: 0 12px; font-size: 12px; border-radius: 3px;
+  border: none; cursor: pointer; font-weight: 500; white-space: nowrap;
+}
+.perf-btn:disabled { opacity: 0.4; cursor: default; }
+.perf-btn-start { background: var(--accent); color: #fff; }
+.perf-btn-stop  { background: #f56c6c; color: #fff; }
+
+.perf-btn-sm {
+  height: 24px; padding: 0 8px; font-size: 11px; border-radius: 3px;
+  border: 1px solid var(--bd); background: transparent; color: var(--fg-2);
+  cursor: pointer; white-space: nowrap;
+}
+.perf-btn-sm:hover { color: var(--fg); background: var(--bg-2); }
+.perf-btn-sm:disabled { opacity: 0.4; cursor: default; }
+.perf-btn-danger:hover { color: #f56c6c; }
+
+/* ── 每指标一张折线图 ── */
+.perf-chart-block {
+  flex-shrink: 0; max-height: 220px; min-height: 120px;
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--bd);
+}
+.perf-chart-label {
+  font-size: 11px; font-weight: 600; color: var(--fg-2);
+  padding: 3px 8px 0; flex-shrink: 0;
+}
+.perf-chart-canvas-wrap {
+  flex: 1; min-height: 0; position: relative;
+}
+.perf-chart-canvas-wrap canvas {
+  display: block; width: 100% !important; height: 100% !important;
+}
+.perf-charts-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--fg-2); font-size: 13px;
+}
+
+.perf-csv-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px; font-size: 12px;
+  flex-shrink: 0; border-bottom: 1px solid var(--bd);
+}
+.perf-csv-link { color: var(--accent); text-decoration: none; }
+.perf-csv-link:hover { text-decoration: underline; }
+.perf-csv-points { color: var(--fg-2); margin-left: 4px; }
+
+.perf-records-body { flex: 1; overflow-y: auto; }
+.perf-records-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-bottom: 1px solid var(--bd);
+}
+.perf-records-title { font-size: 12px; font-weight: 600; color: var(--fg); }
+.perf-records-count { font-size: 11px; color: var(--fg-2); }
+.perf-records-empty {
+  padding: 24px; text-align: center; color: var(--fg-2); font-size: 12px;
+}
+.perf-records-list { padding: 6px; }
+
+.perf-record-card {
+  padding: 8px 10px; margin-bottom: 4px;
+  border: 1px solid var(--bd); border-radius: 4px;
+  background: var(--bg-2);
+}
+.perf-record-card-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.perf-record-card-name {
+  font-size: 12px; font-weight: 600; color: var(--fg);
+  word-break: break-all; flex: 1;
+}
+.perf-record-card-time {
+  font-size: 10px; color: var(--fg-2); white-space: nowrap;
+}
+.perf-record-card-summary { margin-bottom: 4px; }
+.perf-record-card-size   { font-size: 11px; color: var(--fg-2); }
+.perf-record-card-actions { display: flex; gap: 6px; }
+
+/* ── 历史记录查看详情 ── */
+.perf-view-page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.perf-view-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; flex-shrink: 0;
+}
+.perf-view-title { font-size: 12px; font-weight: 600; color: var(--fg); flex: 1; }
+
+.perf-view-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  padding: 4px 10px; border-bottom: 1px solid var(--bd);
+  flex-shrink: 0; font-size: 11px; color: var(--fg-2);
+}
+.perf-meta-item { white-space: nowrap; }
+.perf-meta-lbl { color: var(--fg-2); margin-right: 3px; opacity: 0.7; }
+.perf-meta-item b { color: var(--fg); margin: 0 2px; }
+.perf-meta-item code {
+  font-size: 11px; color: var(--accent);
+  background: var(--bg-2); padding: 0 4px; border-radius: 2px;
+}
+
+/* 图表底部统计条 */
+.perf-chart-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  padding: 3px 8px; flex-shrink: 0;
+  border-top: 1px solid var(--bd);
+  font-size: 10px; color: var(--fg-2);
+}
+.perf-cstat { display: inline-flex; align-items: center; gap: 4px; }
+.perf-cstat-lbl { color: var(--fg-2); opacity: 0.7; }
+.perf-cstat-val { white-space: nowrap; }
+.perf-cstat-val b { color: var(--fg); }
+.perf-cstat-ext { white-space: nowrap; color: var(--fg-2); opacity: 0.6; }
 }

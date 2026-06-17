@@ -257,3 +257,16 @@ export async function deleteAllureReport(name) {
   const response = await fetch(`${API_HOST}allure-reports/${encodeURIComponent(name)}`, { method: 'DELETE' });
   return checkResponse(response);
 }
+
+
+// ── 性能监控器 ─────────────────────────────────────────────
+
+export async function listPerfRecords() {
+  const response = await fetch(`${API_HOST}perf/records`);
+  return checkResponse(response);
+}
+
+export async function deletePerfRecord(name) {
+  const response = await fetch(`${API_HOST}perf/records/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  return checkResponse(response);
+}

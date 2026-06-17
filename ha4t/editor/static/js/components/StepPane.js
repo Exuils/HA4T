@@ -4,6 +4,7 @@ import { saveToLocalStorage, getFromLocalStorage } from '../utils.js';
 import KvRow from './KvRow.js';
 import CodeViewer from './CodeViewer.js';
 import AllureReportsPane from './AllureReportsPane.js';
+import PerfMonitor from './PerfMonitor.js';
 
 const { inject, ref, computed, nextTick, watch } = Vue;
 
@@ -21,7 +22,12 @@ const TEMPLATE = `
         @click="onSwitchPom">POM 采集</button>
     <button :class="['itab', outerTab === 'allure' ? 'active' : '']"
         @click="outerTab = 'allure'">Allure 报告</button>
+    <button :class="['itab', outerTab === 'perf' ? 'active' : '']"
+        @click="outerTab = 'perf'">性能监控</button>
   </div>
+
+  <div class="tab-stack">
+
 
   <!-- ╔════ 用例编辑 tab — 原步骤编辑器 ═══════════════════════════════ ╗ -->
   <div v-show="outerTab === 'caseEdit'" class="case-edit-region">
@@ -461,6 +467,10 @@ const TEMPLATE = `
   <!-- ╔════ Allure 报告 tab — 列出工作区下所有报告 ══════════════════════ ╗ -->
   <AllureReportsPane v-if="outerTab === 'allure'" />
 
+  <!-- ╔════ 性能监控 tab ════════════════════════════════════════════════ ╗ -->
+  <PerfMonitor v-if="outerTab === 'perf'" />
+
+  </div>
   <!-- ── 用例编辑设置对话框（保留原位置） ──────────────────────────── -->
   <el-dialog title="用例设置" v-model="task.settingsVisible.value" width="520px" top="10vh">
     <el-form label-width="80px" size="small">
@@ -566,7 +576,7 @@ const TEMPLATE = `
 export default {
   name: 'StepPane',
   template: TEMPLATE,
-  components: { KvRow, CodeViewer, AllureReportsPane },
+  components: { KvRow, CodeViewer, AllureReportsPane, PerfMonitor },
   setup() {
     const task   = inject('task');
     const device = inject('device');

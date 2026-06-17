@@ -15,11 +15,14 @@ import string
 import sys
 import tempfile
 import time
+import asyncio
+import csv
+import datetime
 from pathlib import Path
 from typing import Union, Dict, Any, Optional, List
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
+from fastapi.responses import RedirectResponse, FileResponse, JSONResponse, Response
 
 from ha4t.editor._device import (
     list_serials, init_device, cached_devices,
@@ -34,6 +37,7 @@ from ha4t.editor.parser.xpath_lite import XPathLiteGenerator
 from ha4t.editor._config import (
     get_workspace, get_tasks_dir, get_images_dir, EditorConfig,
 )
+from ha4t.monitor import AndroidMonitor
 
 
 router = APIRouter()
@@ -1435,6 +1439,236 @@ def serve_allure(path: str):
     if rel_norm in _OPTIONAL_EMPTY:
         return JSONResponse({})
     raise HTTPException(status_code=404, detail="文件不存在")
+
+
+# ── 性能监控器 ──────────────────────────────────────────────────────────
+#
+# WebSocket 实时采集 + CSV 持久化到 ``<workspace>/perf-records/``。
+
+
+def _perf_dir() -> Path | None:
+    """当前工作区的 perf-records 目录；未选工作区返 None。惰性创建。"""
+    if TASKS_DIR is None:
+        return None
+    d = TASKS_DIR / "perf-records"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@router.websocket("/ws/perf")
+async def ws_perf(websocket: WebSocket, platform: str = "", serial: str = ""):
+    """性能监控 WebSocket：实时推送 CPU/内存/电量数据。
+
+    消息格式：
+      - 客户端 → 服务端: ``{"action":"start", "package":"...", "metrics":["cpu","mem","battery"], "interval":2}``
+      - 服务端 → 客户端: ``{"type":"point", "ts": ..., "data":{"cpu_percent": ..., ...}}``
+      - 客户端 → 服务端: ``{"action":"stop"}``
+      - 服务端 → 客户端: ``{"type":"done", "csv_path":"..."}``
+    """
+    await websocket.accept()
+    if TASKS_DIR is None:
+        await websocket.send_json({"type": "error", "msg": "未选择工作区"})
+        await websocket.close()
+        return
+    if not serial:
+        await websocket.send_json({"type": "error", "msg": "缺少 serial 参数"})
+        await websocket.close()
+        return
+    collector_task = None
+    collected = []  # 暂存采集点，stop 时写 CSV
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            action = msg.get("action", "")
+
+            if action == "start":
+                package = msg.get("package", "")
+                metrics = msg.get("metrics", ["cpu", "mem", "battery"])
+                interval = max(1, min(30, int(msg.get("interval", 2))))
+                track_sub = msg.get("track_subprocesses", True)
+                mem_mode = msg.get("memory_mode", "rss")
+                collected = []
+
+                prev_cpu_ns = None
+                prev_cpu_stat = None
+                prev_cores = None
+                prev_wall = None
+
+                def _calc_ticks(vals: dict) -> int:
+                    if not vals: return 0
+                    return sum(v for v in vals.values() if isinstance(v, (int, float)))
+
+                def _core_pct(cur: dict, prev: dict) -> float | None:
+                    if not cur or not prev: return None
+                    cd = _calc_ticks(cur) - _calc_ticks(prev)
+                    idle_d = (cur.get('idle', 0) or 0) - (prev.get('idle', 0) or 0)
+                    if cd <= 0: return 0.0
+                    return round((cd - idle_d) / cd * 100, 1)
+
+                monitor = AndroidMonitor(serial, package, track_subprocesses=track_sub, memory_mode=mem_mode)
+                async def _collect():
+                    nonlocal prev_cpu_ns, prev_cpu_stat, prev_cores, prev_wall
+                    first = True
+                    try:
+                        while True:
+                            cycle_start = time.time()
+                            wall_ns = time.time_ns()
+                            data = monitor.collect_metrics(metrics)
+
+                            cpu_ns = data.pop("cpu_ns", None)
+                            cpu_stat = data.pop("cpu_stat", None)
+                            cores = data.pop("cores", None)
+
+                            if first:
+                                first = False
+                                prev_cpu_ns = cpu_ns
+                                prev_cpu_stat = cpu_stat
+                                prev_cores = cores
+                                prev_wall = wall_ns
+                                continue
+
+                            data["cpu_percent"] = round((cpu_ns - prev_cpu_ns) / max(wall_ns - prev_wall, 1) * 100, 1) if (cpu_ns is not None and prev_cpu_ns is not None) else None
+                            if cpu_ns is not None:
+                                data["cpu_ns"] = cpu_ns
+
+                            if cpu_stat and prev_cpu_stat:
+                                data["sys_cpu_percent"] = _core_pct(cpu_stat, prev_cpu_stat)
+
+                            if cores and prev_cores:
+                                for cid in cores:
+                                    if cid in prev_cores:
+                                        pct = _core_pct(cores[cid], prev_cores[cid])
+                                        if pct is not None:
+                                            data[f"core_{cid}"] = pct
+
+                            prev_cpu_ns = cpu_ns
+                            prev_cpu_stat = cpu_stat
+                            prev_cores = cores
+                            prev_wall = wall_ns
+
+                            ts = time.time()
+                            point = {"ts": ts, "data": data}
+                            collected.append(point)
+                            await websocket.send_json({"type": "point", "ts": ts, "data": data})
+
+                            elapsed = time.time() - cycle_start
+                            await asyncio.sleep(max(0, interval - elapsed))
+                    except asyncio.CancelledError:
+                        pass
+
+                collector_task = asyncio.create_task(_collect())
+                await websocket.send_json({"type": "started", "msg": "开始采集"})
+
+            elif action == "stop":
+                if collector_task:
+                    collector_task.cancel()
+                    collector_task = None
+
+                # 写 CSV + 设备 meta
+                perf_dir = _perf_dir()
+                if perf_dir and collected:
+                    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_pkg = re.sub(r'[^A-Za-z0-9_]+', '_', package) if package else "all"
+                    csv_name = f"perf_{safe_pkg}_{ts_str}.csv"
+                    csv_path = perf_dir / csv_name
+                    # 采集设备环境
+                    info = {}
+                    try:
+                        o = subprocess.run(["adb","-s",serial,"shell","getprop ro.product.model"], capture_output=True, text=True, timeout=5)
+                        if o.returncode == 0: info["device"] = o.stdout.strip()
+                        o = subprocess.run(["adb","-s",serial,"shell","getprop ro.build.version.release"], capture_output=True, text=True, timeout=5)
+                        if o.returncode == 0: info["android"] = o.stdout.strip()
+                    except: pass
+                    info["interval"] = str(interval)
+                    info["package"] = package or ""
+                    # 收集所有出现的字段
+                    all_keys = set()
+                    for pt in collected:
+                        all_keys.update(pt["data"].keys())
+                    sorted_keys = sorted(all_keys)
+                    with csv_path.open("w", newline="", encoding="utf-8") as f:
+                        for k, v in info.items():
+                            if v: f.write(f"# {k}={v}\n")
+                        writer = csv.writer(f)
+                        writer.writerow(["ts"] + sorted_keys)
+                        for pt in collected:
+                            row = [pt["ts"]]
+                            for k in sorted_keys:
+                                v = pt["data"].get(k)
+                                row.append(v if v is not None else "")
+                            writer.writerow(row)
+                    await websocket.send_json({"type": "done", "csv_path": csv_name, "points": len(collected)})
+                else:
+                    await websocket.send_json({"type": "done", "csv_path": "", "points": 0})
+                break
+
+            else:
+                await websocket.send_json({"type": "error", "msg": f"未知动作: {action}"})
+    except WebSocketDisconnect:
+        if collector_task:
+            collector_task.cancel()
+    finally:
+        if collector_task:
+            collector_task.cancel()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@router.get("/perf/records", response_model=ApiResponse)
+def list_perf_records():
+    """列出当前工作区下所有性能监控 CSV 记录。"""
+    if TASKS_DIR is None:
+        return _no_ws()
+    d = _perf_dir()
+    if d is None:
+        return ApiResponse.doSuccess({"records": []})
+    items = []
+    for f in sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not f.is_file() or f.suffix.lower() != ".csv":
+            continue
+        stat = f.stat()
+        items.append({
+            "name": f.name,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        })
+    return ApiResponse.doSuccess({"records": items})
+
+
+
+@router.get("/perf/records/{name}")
+def get_perf_record(name: str):
+    """返回指定性能记录 CSV 文件内容。"""
+    if TASKS_DIR is None:
+        return _no_ws()
+    if not name or '/' in name or '\\' in name or name.startswith('.'):
+        return ApiResponse.doError("非法的文件名")
+    d = _perf_dir()
+    if d is None:
+        return ApiResponse.doError("无工作区")
+    target = d / name
+    if not target.exists():
+        return ApiResponse.doError("记录不存在")
+    return Response(content=target.read_text(encoding="utf-8"), media_type="text/csv")
+
+@router.delete("/perf/records/{name}", response_model=ApiResponse)
+def delete_perf_record(name: str):
+    """删除指定性能记录 CSV 文件。"""
+    if TASKS_DIR is None:
+        return _no_ws()
+    if not name or '/' in name or '\\' in name or name.startswith('.'):
+        return ApiResponse.doError("非法的文件名")
+    d = _perf_dir()
+    if d is None:
+        return ApiResponse.doError("无工作区")
+    target = d / name
+    if not target.exists():
+        return ApiResponse.doError("记录不存在")
+    target.unlink(missing_ok=True)
+    return ApiResponse.doSuccess({"deleted": name})
 
 
 # ── 注意：以下两个 catch-all 路由必须保持在文件末尾。 ──
